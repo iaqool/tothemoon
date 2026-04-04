@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+*.log
+seen_coins.json
+
+# Environment
+.env
+.env.local
+
+# Node / Frontend
+node_modules/
+dashboard/node_modules/
+dashboard/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
