@@ -1,0 +1,144 @@
+name: Outreach Cycle
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '30 8 * * *'
+
+concurrency:
+  group: outreach-cycle
+  cancel-in-progress: false
+
+jobs:
+  outreach:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      PYTHONIOENCODING: utf-8
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Capture baseline metrics
+        id: before_metrics
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime
+          from supabase import create_client
+
+          supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+          replied = supabase.table('projects').select('id', count='exact').eq('status', 'replied').execute()
+          
+          output = os.environ['GITHUB_OUTPUT']
+          with open(output, 'a', encoding='utf-8') as fh:
+              fh.write(f"replied={replied.count or 0}\n")
+              # UTC time before we run the script
+              fh.write(f"start_time={datetime.utcnow().isoformat()}+00:00\n")
+          PY
+
+      - name: Run outreach cycle
+        run: python auto_outreach.py
+
+      - name: Write outreach summary
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from supabase import create_client
+          
+          supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+          
+          before_replied = int('${{ steps.before_metrics.outputs.replied }}')
+          start_time = '${{ steps.before_metrics.outputs.start_time }}'
+          
+          after_replied_res = supabase.table('projects').select('id', count='exact').eq('status', 'replied').execute()
+          after_replied = after_replied_res.count or 0
+          replied_delta = after_replied - before_replied
+          
+          # Fetch all logs from this run
+          res = (
+              supabase.table('outreach_logs')
+              .select('id, stage, contacts!inner(project_id, value, projects!inner(name, chain, mcap, is_upcoming))')
+              .gte('sent_at', start_time)
+              .execute()
+          )
+          logs = res.data or []
+          
+          stage1_count = 0
+          followup1_count = 0
+          followup2_count = 0
+          whales_count = 0
+          solana_count = 0
+          ton_count = 0
+          base_count = 0
+          upcoming_count = 0
+          
+          all_contacted_projects = []
+          
+          for log in logs:
+              stage = log.get('stage', '')
+              if stage == 'Stage 1 (Cold)': stage1_count += 1
+              elif stage == 'Follow-up 1': followup1_count += 1
+              elif stage == 'Follow-up 2': followup2_count += 1
+              
+              contact = log.get('contacts', {})
+              project = contact.get('projects', {})
+              chain = project.get('chain', '')
+              mcap = float(project.get('mcap') or 0)
+              is_upcoming = project.get('is_upcoming') is True
+              
+              if stage == 'Stage 1 (Cold)':
+                  all_contacted_projects.append({'name': project.get('name'), 'mcap': mcap, 'chain': chain})
+                  if mcap > 1000000:
+                      whales_count += 1
+                  if chain == 'Solana': solana_count += 1
+                  if chain == 'TON': ton_count += 1
+                  if chain == 'Base': base_count += 1
+                  if is_upcoming: upcoming_count += 1
+          
+          # Sort by mcap descending for top opportunities
+          all_contacted_projects.sort(key=lambda x: x['mcap'], reverse=True)
+          top_opps = all_contacted_projects[:3]
+          
+          summary_file = os.environ.get('GITHUB_STEP_SUMMARY')
+          if summary_file:
+              with open(summary_file, 'a', encoding='utf-8') as fh:
+                  fh.write("## 🚀 TTM Pipeline 3.0: Outreach Report\n\n")
+                  fh.write("### 📊 Overview\n")
+                  fh.write(f"- 📨 **Stage 1 Sent:** {stage1_count}\n")
+                  fh.write(f"- ⏳ **Follow-ups Sent:** {followup1_count + followup2_count}\n")
+                  fh.write(f"- 🤝 **Net New Replies:** {replied_delta}\n\n")
+                  
+                  fh.write("### 🎯 Ecosystem Split (Stage 1)\n")
+                  fh.write(f"- **Solana:** {solana_count}\n")
+                  fh.write(f"- **TON:** {ton_count}\n")
+                  fh.write(f"- **Base:** {base_count}\n")
+                  fh.write(f"- **Other:** {stage1_count - solana_count - ton_count - base_count}\n\n")
+                  
+                  fh.write("### 🐋 Lead Quality\n")
+                  fh.write(f"- **Whales Contacted (MCap > $1M):** {whales_count}\n")
+                  fh.write(f"- **Pre-launch Leads (Upcoming):** {upcoming_count}\n\n")
+                  
+                  if top_opps:
+                      fh.write("### 🌟 Top Opportunities\n")
+                      for idx, op in enumerate(top_opps, 1):
+                          fh.write(f"{idx}. **{op['name']}** ({op['chain']}) — MCap: ${op['mcap']:,.0f}\n")
+                  else:
+                      fh.write("### 🌟 Top Opportunities\n- No new projects contacted today.\n")
+          PY

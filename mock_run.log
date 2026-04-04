@@ -1,0 +1,24 @@
+C:\Users\USER\.gemini\antigravity\playground\ionic-event\ttm-lead-gen\ai_generator.py:2: FutureWarning: 
+
+All support for the `google.generativeai` package has ended. It will no longer be receiving 
+updates or bug fixes. Please switch to the `google.genai` package as soon as possible.
+See README for more details:
+
+https://github.com/google-gemini/deprecated-generative-ai-python/blob/main/README.md
+
+  import google.generativeai as genai
+
+==================================================
+ЁЯЪА TTM Auto-Pilot: Outreach Cycle Started
+==================================================
+
+--- Processing Stage 1 (Cold) ---
+Stage 1 total sent: 0
+
+--- Processing Follow-ups ---
+C:\Users\USER\.gemini\antigravity\playground\ionic-event\ttm-lead-gen\auto_outreach.py:157: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+  now = datetime.utcnow().replace(tzinfo=None) # ╤Г╤Б╨╗╨╛╨▓╨╜╨╛ UTC-naive ╨┤╨╗╤П ╤Б╤А╨░╨▓╨╜╨╡╨╜╨╕╤П
+Follow-ups total sent: 0
+
+тЬЕ Outreach Cycle Completed
+

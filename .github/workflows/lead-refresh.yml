@@ -1,0 +1,176 @@
+name: Lead Refresh
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Enrichment mode'
+        required: false
+        default: 'email_only'
+        type: choice
+        options:
+          - email_only
+          - full
+      enrich_limit:
+        description: 'How many projects to enrich'
+        required: false
+        default: '30'
+
+concurrency:
+  group: lead-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONIOENCODING: utf-8
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+      SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+      CG_API_KEY: ${{ secrets.CG_API_KEY }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+      ENRICH_LIMIT: ${{ inputs.enrich_limit || '30' }}
+      ENRICH_MODE: ${{ inputs.mode || 'email_only' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Capture baseline metrics
+        id: before_metrics
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from supabase import create_client
+
+          supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+
+          def count_contacts(**filters):
+              query = supabase.table('contacts').select('id', count='exact')
+              for field, value in filters.items():
+                  query = query.eq(field, value)
+              res = query.execute()
+              return res.count or 0
+
+          output = os.environ['GITHUB_OUTPUT']
+          with open(output, 'a', encoding='utf-8') as fh:
+              fh.write(f"emails={count_contacts(platform='Email')}\n")
+              fh.write(f"founders={count_contacts(role='Founder')}\n")
+              fh.write(f"bd={count_contacts(role='BD / Partnerships')}\n")
+              fh.write(f"listing={count_contacts(role='Listing Manager')}\n")
+          PY
+
+      - name: Run scraper
+        run: python scraper.py
+
+      - name: Run upcoming scraper
+        run: python scraper_upcoming.py
+
+      - name: Run enricher
+        run: python -c "import os, enricher; enricher.run(limit=int(os.getenv('ENRICH_LIMIT', '30')), email_only=os.getenv('ENRICH_MODE', 'email_only') == 'email_only')"
+
+      - name: Capture post-run metrics
+        id: after_metrics
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from supabase import create_client
+
+          supabase = create_client(os.environ['SUPABASE_URL'], os.environ['SUPABASE_KEY'])
+
+          def count_contacts(**filters):
+              query = supabase.table('contacts').select('id', count='exact')
+              for field, value in filters.items():
+                  query = query.eq(field, value)
+              res = query.execute()
+              return res.count or 0
+
+          priority = (
+              supabase.table('contacts')
+              .select('platform, role, created_at, projects!inner(name, chain, mcap)')
+              .eq('platform', 'Email')
+              .order('created_at', desc=True)
+              .limit(20)
+              .execute()
+          )
+
+          output = os.environ['GITHUB_OUTPUT']
+          with open(output, 'a', encoding='utf-8') as fh:
+              fh.write(f"emails={count_contacts(platform='Email')}\n")
+              fh.write(f"founders={count_contacts(role='Founder')}\n")
+              fh.write(f"bd={count_contacts(role='BD / Partnerships')}\n")
+              fh.write(f"listing={count_contacts(role='Listing Manager')}\n")
+
+              leads = []
+              for row in (priority.data or []):
+                  project = row.get('projects') or {}
+                  if project.get('chain') not in {'Solana', 'TON', 'Base'}:
+                      continue
+                  name = project.get('name', 'Unknown')
+                  chain = project.get('chain', '?')
+                  mcap = project.get('mcap') or 0
+                  try:
+                      mcap_text = f"${float(mcap):,.0f}"
+                  except Exception:
+                      mcap_text = str(mcap)
+                  leads.append(f"{name} ({chain}, MCap {mcap_text})")
+                  if len(leads) >= 5:
+                      break
+
+              fh.write(f"priority_leads={' | '.join(leads)}\n")
+          PY
+
+      - name: Write summary
+        shell: bash
+        run: |
+          before_emails=${{ steps.before_metrics.outputs.emails }}
+          before_founders=${{ steps.before_metrics.outputs.founders }}
+          before_bd=${{ steps.before_metrics.outputs.bd }}
+          before_listing=${{ steps.before_metrics.outputs.listing }}
+
+          after_emails=${{ steps.after_metrics.outputs.emails }}
+          after_founders=${{ steps.after_metrics.outputs.founders }}
+          after_bd=${{ steps.after_metrics.outputs.bd }}
+          after_listing=${{ steps.after_metrics.outputs.listing }}
+
+          email_delta=$((after_emails - before_emails))
+          founder_delta=$((after_founders - before_founders))
+          bd_delta=$((after_bd - before_bd))
+          listing_delta=$((after_listing - before_listing))
+
+          {
+            echo "## Lead Refresh Summary"
+            echo ""
+            echo "- Mode: \\`${ENRICH_MODE}\\`"
+            echo "- Processed target: \\`${ENRICH_LIMIT}\\` projects"
+            echo "- Found new Emails: **${email_delta}**"
+            echo "- Found new Founders: **${founder_delta}**"
+            echo "- Found new BD / Partnerships: **${bd_delta}**"
+            echo "- Found new Listing Managers: **${listing_delta}**"
+            echo ""
+            echo "### Priority Leads"
+            if [ -n "${{ steps.after_metrics.outputs.priority_leads }}" ]; then
+              IFS='|' read -ra leads <<< "${{ steps.after_metrics.outputs.priority_leads }}"
+              for lead in "${leads[@]}"; do
+                echo "- ${lead}"
+              done
+            else
+              echo "- No recent priority email leads found"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
