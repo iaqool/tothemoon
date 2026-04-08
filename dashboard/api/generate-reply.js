@@ -2,26 +2,39 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 
 function formatMcap(mcap) {
   if (!mcap) return 'Unknown'
-  if (mcap >= 1e9) return `$${(mcap / 1e9).toFixed(2)}B`
-  if (mcap >= 1e6) return `$${(mcap / 1e6).toFixed(2)}M`
+  if (mcap >= 1e6) return `$${(mcap / 1e6).toFixed(1)}M`
   if (mcap >= 1e3) return `$${(mcap / 1e3).toFixed(1)}K`
   return `$${mcap}`
 }
 
-function getTone(chain) {
-  return ['Solana', 'TON', 'Base'].includes(chain) ? 'energetic' : 'formal'
-}
-
-function buildFallbackReply(name, ticker, chain, isUpcoming = false, launchpad = '') {
-  const tokenRef = ticker ? `${name} (${ticker})` : name
+function buildFallbackReply(name, ticker, isUpcoming = false, launchpad = '') {
+  const tokenRef = ticker ? `${name} ($${ticker})` : name
+  
   if (isUpcoming) {
-    return `Thanks for sharing the upcoming launch plans for ${tokenRef}${launchpad ? ` on ${launchpad}` : ''}. TTM is a Top-30 global exchange with 2M+ active users across 160+ countries, 300+ listed assets, and a CER 3-star security rating, and we help teams secure launch-day liquidity from the start. Our market making baseline is an average spread below 1%, daily trading volume above $10,000, and at least $1,000 depth within +/-1.9% of the mid price; if needed, we can also support with Listagram as a lightweight liquidity tool. Please share your token ticker, chain or contract standard, preferred launch timeline, and best TG or email contact so we can prepare a preliminary listing offer.`
-  }
-  const intro = ['Solana', 'TON', 'Base'].includes(chain)
-    ? `Hey! Love the momentum ${tokenRef} is building on ${chain}.`
-    : `Thanks for your interest in listing ${tokenRef} on Tothemoon.`
+    return `Hi, I saw ${tokenRef} is gearing up for launch${launchpad ? ` on ${launchpad}` : ''} and thought it was the right moment to discuss liquidity and listing support early.
 
-  return `${intro} TTM is a Top-30 global exchange with 2M+ active users across 160+ countries, 300+ listed assets, and a CER 3-star security rating. For listing readiness, we require an average spread below 1%, daily trading volume above $10,000, and at least $1,000 depth within +/-1.9% of the mid price. If your team does not yet have a market maker, we can also offer Listagram as a free liquidity support tool. Please share your token ticker, chain/contract standard, preferred listing timeline, and best TG or email contact so we can prepare a preliminary offer.`
+We work with projects ahead of launch to make sure day-one trading does not break on liquidity. TTM gives teams direct access to 2M+ active traders, Top-30 exchange distribution, and clear MM standards from the first trading session.
+
+Our baseline is spread < 1%, daily volume > $10k, and stable depth around the mid price. If your team still needs a lightweight MM setup, we can also support with Listagram.
+
+If your sale timeline is already taking shape, happy to prepare a preliminary listing path before launch.
+
+Best,
+The Tothemoon Team
+https://tothemoon.agency`
+  }
+
+  return `Hi, I've been tracking ${tokenRef}'s recent growth and am really impressed by what your team is building.
+
+We specialize in helping projects like ${tokenRef} maximize visibility across Tier-1/2 CEXs and build sustained liquidity (spread < 1%, volume > $10k). We have a database of 2M+ users and are a Top-30 agency globally.
+
+Also, we provide free tools like Listagram bot for automated listing tracking to help your community stay engaged.
+
+Would love to have a quick 10-min call this week — are you open to it?
+
+Best,
+The Tothemoon Team
+https://tothemoon.agency`
 }
 
 export default async function handler(req, res) {
@@ -35,64 +48,97 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Missing project details' })
   }
 
-  const fallbackReply = buildFallbackReply(name, ticker, chain, isUpcoming, launchpad)
+  const fallbackReply = buildFallbackReply(name, ticker, isUpcoming, launchpad)
   const apiKey = process.env.GEMINI_API_KEY
+  
   if (!apiKey) {
     return res.status(200).json({ reply: fallbackReply })
   }
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash' })
-    const tone = getTone(chain)
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
 
-    const upcomingContext = isUpcoming
-      ? `This project is still pre-launch${launchpad ? ` and is preparing for a sale on ${launchpad}` : ''}${launchDate ? ` with a target launch date around ${launchDate}` : ''}. Angle the reply around launch-day liquidity, pre-listing coordination, and getting the project in front of traders before momentum peaks.`
-      : 'This project is already live or actively trading. Angle the reply around listing readiness and current liquidity conditions.'
+    const toneGuideline = ['Solana', 'TON', 'Base'].includes(chain)
+      ? 'Use a slightly energetic and informal tone (you can use one emoji like 🚀 or 🔥). These are often memecoins or hype projects.'
+      : 'Use a formal, professional tone. These are typically DeFi or enterprise projects.'
 
-    const prompt = `You are the lead listing manager at Tothemoon (TTM). Write one short outbound-ready reply in English for a crypto project asking about listing or market making requirements.
+    const launchContext = isUpcoming
+      ? `The project is preparing for an upcoming token sale${launchpad ? ` on ${launchpad}` : ''}${launchDate ? ` scheduled for ${new Date(launchDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}. Focus on pre-launch liquidity, day-one trading readiness, and early listing coordination.`
+      : 'The project is already live. Focus on current traction, market momentum, and scaling liquidity.'
 
-Project context:
-- Project name: ${name}
-- Ticker: ${ticker || 'Unknown'}
-- Chain: ${chain}
-- Market cap: ${formatMcap(mcap)}
-- Launchpad: ${launchpad || 'Unknown'}
-- Upcoming project: ${isUpcoming ? 'Yes' : 'No'}
+    const prompt = `You are a professional Business Development Manager at 'Tothemoon', a Top-30 crypto exchange listing agency with 2M+ active traders.
 
-Strategic context:
-- ${upcomingContext}
+Write exactly ONE engaging, personalized opening sentence for a cold email to the team of a crypto project.
 
-Required facts to include naturally:
-- TTM is a Top-30 global exchange.
-- TTM has 2M+ active users across 160+ countries.
-- TTM has 300+ listed assets and a CER 3-star security rating.
-- Market making requirements: average spread below 1% over 24 hours, daily volume above $10,000, and at least $1,000 order book depth within +/-1.9% from the mid price.
-- Mention full marketing support such as AMA sessions, airdrops, and trading competitions.
-- If the project may not have a market maker yet, mention Listagram as a free liquidity support tool.
+Project Details:
+- Name: ${name}
+- Ticker: ${ticker || 'N/A'}
+- Blockchain: ${chain}
+- Market Cap: ${formatMcap(mcap)}
+- Context: ${launchContext}
 
-Tone rules:
-- Overall tone for this project: ${tone}.
-- If chain is Solana, TON, or Base, use an energetic tone and you may use one fitting emoji.
-- Otherwise use a formal, confident, professional tone.
-- Keep it concise: 4 to 6 sentences.
-- No bullet points.
-- No fluff.
+TTM Value Proposition (keep it simple):
+- Top-30 exchange globally with 2M+ active users
+- Strict liquidity standards: spread < 1%, daily volume > $10k
+- Full market making support and exchange distribution
+- Free tools like Listagram bot for community engagement
 
-The reply must end with a CTA asking for these details so you can prepare a preliminary listing offer:
-- token name or ticker
-- blockchain / contract standard
-- preferred listing timeline
-- best TG or email contact
+Rules:
+1. Start with "Hi," or "Hey," (choose based on tone)
+2. Write exactly ONE sentence after the greeting
+3. Be natural and conversational, not overly salesy
+4. Mention their recent launch, growth, or upcoming sale
+5. ${toneGuideline}
+6. Do not include subject lines, sign-offs, or any other text
+7. Keep it under 30 words
 
-Return only the final reply text.`
+Output example:
+Hi, I saw ${name}'s recent momentum on ${chain} and was really impressed by the trading volume you're building!`
 
     const result = await model.generateContent(prompt)
-    const text = result.response.text()?.trim()
+    const response = await result.response
+    let generatedText = response.text().trim()
 
-    return res.status(200).json({ reply: text || fallbackReply })
+    // Clean up response (remove quotes if present)
+    if (generatedText.startsWith('"') && generatedText.endsWith('"')) {
+      generatedText = generatedText.slice(1, -1)
+    }
+
+    // Build full email based on project type
+    const fullEmail = isUpcoming
+      ? `${generatedText}
+
+We work with projects ahead of launch to make sure day-one trading does not break on liquidity. TTM gives teams direct access to 2M+ active traders, Top-30 exchange distribution, and clear MM standards from the first trading session.
+
+Our baseline is spread < 1%, daily volume > $10k, and stable depth around the mid price. If your team still needs a lightweight MM setup, we can also support with Listagram${launchpad ? ` on ${launchpad}` : ''}.
+
+If your sale timeline is already taking shape, happy to prepare a preliminary listing path before launch.
+
+Best,
+The Tothemoon Team
+https://tothemoon.agency`
+      : `${generatedText}
+
+We specialize in helping projects like ${name} maximize visibility across Tier-1/2 CEXs and build sustained liquidity (spread < 1%, volume > $10k). We have a database of 2M+ users and are a Top-30 agency globally.
+
+Also, we provide free tools like Listagram bot for automated listing tracking to help your community stay engaged.
+
+Would love to have a quick 10-min call this week — are you open to it?
+
+Best,
+The Tothemoon Team
+https://tothemoon.agency`
+
+    return res.status(200).json({ 
+      reply: fullEmail,
+      icebreaker: generatedText 
+    })
   } catch (error) {
     console.error('Gemini API Error:', error)
-    return res.status(200).json({ reply: fallbackReply })
+    return res.status(200).json({ 
+      reply: fallbackReply,
+      fallback: true 
+    })
   }
 }
