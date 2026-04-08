@@ -20,6 +20,7 @@ export default async function handler(req, res) {
         return res.status(405).json({ error: 'Method not allowed' });
     }
 
+<<<<<<< HEAD
     // Verify webhook secret if configured
     if (RESEND_WEBHOOK_SECRET) {
         // Different providers use different headers. 
@@ -31,6 +32,18 @@ export default async function handler(req, res) {
             // but in production we should reject.
             console.warn("[WARN] Invalid or missing Authorization header.");
         }
+=======
+    // Verify webhook secret
+    if (!RESEND_WEBHOOK_SECRET) {
+        console.error("[ERROR] RESEND_WEBHOOK_SECRET not configured");
+        return res.status(500).json({ error: 'Server misconfiguration' });
+    }
+    
+    const authHeader = req.headers['authorization'];
+    if (authHeader !== `Bearer ${RESEND_WEBHOOK_SECRET}`) {
+        console.error("[ERROR] Unauthorized webhook request");
+        return res.status(401).json({ error: 'Unauthorized' });
+>>>>>>> b2272c360824ebc5711821c9f75c73a832fc0b13
     }
 
     try {
@@ -39,6 +52,14 @@ export default async function handler(req, res) {
         // Handle Resend Webhook wrapping (if any) or direct raw payload
         const emailData = payload.type && payload.data ? payload.data : payload;
         
+<<<<<<< HEAD
+=======
+        // Validate payload structure
+        if (!emailData || typeof emailData !== 'object') {
+            return res.status(400).json({ error: 'Invalid payload structure' });
+        }
+        
+>>>>>>> b2272c360824ebc5711821c9f75c73a832fc0b13
         const fromString = emailData.from || '';
         const senderEmail = extractEmail(fromString);
         
@@ -76,15 +97,26 @@ export default async function handler(req, res) {
                 .update({ status: 'replied' })
                 .eq('id', contact.project_id);
                 
-            // 3. Log the response in outreach_logs
-            await supabase
-                .from('outreach_logs')
-                .insert({
-                    contact_id: contact.id,
-                    stage: 'Inbound Reply',
-                    response: emailData.text || emailData.html || 'No content parsed',
-                    raw_payload: payload 
-                });
+<<<<<<< HEAD
+        // 3. Log the response in outreach_logs
+        await supabase
+            .from('outreach_logs')
+            .insert({
+                contact_id: contact.id,
+                stage: 'Inbound Reply',
+                response: emailData.text || emailData.html || 'No content parsed'
+            });
+=======
+        // 3. Log the response in outreach_logs
+        await supabase
+            .from('outreach_logs')
+            .insert({
+                contact_id: contact.id,
+                stage: 'Inbound Reply',
+                response: emailData.text || emailData.html || 'No content parsed',
+                raw_payload: payload 
+            });
+>>>>>>> b2272c360824ebc5711821c9f75c73a832fc0b13
         }
 
         return res.status(200).json({ success: true, matchedContacts: contacts.length });
