@@ -496,6 +496,7 @@ export default function App() {
       .from('projects')
       .select('*')
       .order('created_at', { ascending: false })
+      .limit(500)
 
     const projList = proj || []
     setProjects(projList)
