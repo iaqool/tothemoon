@@ -496,7 +496,7 @@ export default function App() {
       .from('projects')
       .select('*')
       .order('created_at', { ascending: false })
-      .limit(500)
+      .limit(100)
 
     const projList = proj || []
     setProjects(projList)
@@ -520,10 +520,21 @@ export default function App() {
     const cont = contactsResult.data || []
     const logsData = logsResult.data || []
 
+    console.log('📊 Dashboard Data Loaded:', {
+      projects: projList.length,
+      contacts: cont.length,
+      logs: logsData.length
+    })
+
     const groupedContacts = {}
     cont.forEach(c => {
       if (!groupedContacts[c.project_id]) groupedContacts[c.project_id] = []
       groupedContacts[c.project_id].push(c)
+    })
+
+    console.log('📊 Grouped Contacts:', {
+      projectsWithContacts: Object.keys(groupedContacts).length,
+      totalContacts: cont.length
     })
 
     const allowedProjectIds = new Set(ids)

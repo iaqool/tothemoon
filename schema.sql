@@ -38,10 +38,7 @@ CREATE TABLE IF NOT EXISTS public.contacts (
 );
 
 ALTER TABLE public.contacts ADD COLUMN IF NOT EXISTS contact_name TEXT;
-<<<<<<< HEAD
-=======
-ALTER TABLE outreach_logs ADD COLUMN IF NOT EXISTS raw_payload JSONB;
->>>>>>> b2272c360824ebc5711821c9f75c73a832fc0b13
+ALTER TABLE public.outreach_logs ADD COLUMN IF NOT EXISTS raw_payload JSONB;
 
 -- 3. Таблица логов аутрича
 CREATE TABLE IF NOT EXISTS public.outreach_logs (
@@ -50,12 +47,8 @@ CREATE TABLE IF NOT EXISTS public.outreach_logs (
     stage TEXT NOT NULL, -- Stage 1 (Cold), Follow-up 1, Follow-up 2, Stage 2 (Offer)
     message_sent TEXT,
     sent_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
-<<<<<<< HEAD
-    response TEXT
-=======
     response TEXT,
     raw_payload JSONB
->>>>>>> b2272c360824ebc5711821c9f75c73a832fc0b13
 );
 
 -- Функция для обновления updated_at

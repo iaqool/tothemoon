@@ -228,13 +228,25 @@ def save_contacts(project_id: str, project_url: str, links: dict):
             }
         )
 
-    for row in rows:
-        try:
-            supabase.table("contacts").insert(row).execute()
-        except Exception as exc:
-            err = str(exc).lower()
-            if "duplicate" not in err and "unique" not in err:
-                print(f"    [WARN contacts] {row['platform']}: {exc}")
+    if not rows:
+        return
+
+    # Попытка batch insert
+    try:
+        supabase.table("contacts").insert(rows).execute()
+    except Exception as exc:
+        err = str(exc).lower()
+        # Если batch insert упал из-за дубликатов, делаем поштучную вставку
+        if "duplicate" in err or "unique" in err:
+            for row in rows:
+                try:
+                    supabase.table("contacts").insert(row).execute()
+                except Exception as exc2:
+                    err2 = str(exc2).lower()
+                    if "duplicate" not in err2 and "unique" not in err2:
+                        print(f"    [WARN contacts] {row['platform']}: {exc2}")
+        else:
+            print(f"    [ERROR batch insert contacts] {exc}")
 
 
 def find_existing_project(

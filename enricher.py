@@ -385,23 +385,42 @@ def find_bd_email_on_site(website_url: str) -> list[dict]:
 # ─── Save to Supabase ─────────────────────────────────────────────────────────
 def save_individual_contacts(project_id: str, candidates: list[dict]):
     """Сохраняем каждый найденный контакт как отдельную строку в contacts."""
-    saved = 0
-    for c in candidates:
-        row = {
+    if not candidates:
+        return 0
+
+    # Подготовка всех строк для batch insert
+    rows = [
+        {
             "project_id": project_id,
             "platform": c["platform"],
             "value": c["handle"],
             "role": c.get("role", "Team Member"),
             "contact_name": c.get("name") or None,
         }
-        try:
-            supabase.table("contacts").insert(row).execute()
-            saved += 1
-        except Exception as e:
-            err = str(e).lower()
-            if "duplicate" not in err and "unique" not in err:
-                print(f"    [WARN save] {c['platform']} {c['handle']}: {e}")
-    return saved
+        for c in candidates
+    ]
+
+    # Попытка batch insert
+    try:
+        result = supabase.table("contacts").insert(rows).execute()
+        return len(result.data)
+    except Exception as e:
+        err = str(e).lower()
+        # Если batch insert упал из-за дубликатов, делаем поштучную вставку
+        if "duplicate" in err or "unique" in err:
+            saved = 0
+            for row in rows:
+                try:
+                    supabase.table("contacts").insert(row).execute()
+                    saved += 1
+                except Exception as e2:
+                    err2 = str(e2).lower()
+                    if "duplicate" not in err2 and "unique" not in err2:
+                        print(f"    [WARN save] {row['platform']} {row['value']}: {e2}")
+            return saved
+        else:
+            print(f"    [ERROR batch insert] {e}")
+            return 0
 
 
 def has_personal_contact(contact_rows: list[dict]) -> bool:
