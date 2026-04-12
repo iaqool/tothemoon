@@ -489,12 +489,30 @@ export default function App() {
     setTimeout(() => setToast(null), 3000)
   }
 
-  const loadData = useCallback(async () => {
+  const loadData = useCallback(async (searchTerm = '', statusFilter = 'Все', chainFilter = 'Все') => {
     setLoading(true)
 
-    const { data: proj } = await supabase
+    // Строим запрос с фильтрами на стороне Supabase
+    let query = supabase
       .from('projects')
-      .select('*')
+      .select('*', { count: 'exact' })
+
+    // Фильтр по поиску (name или ticker)
+    if (searchTerm) {
+      query = query.or(`name.ilike.%${searchTerm}%,ticker.ilike.%${searchTerm}%`)
+    }
+
+    // Фильтр по статусу
+    if (statusFilter !== 'Все') {
+      query = query.eq('status', statusFilter)
+    }
+
+    // Фильтр по chain
+    if (chainFilter !== 'Все') {
+      query = query.eq('chain', chainFilter)
+    }
+
+    const { data: proj } = await query
       .order('created_at', { ascending: false })
       .limit(100)
 
@@ -523,7 +541,8 @@ export default function App() {
     console.log('📊 Dashboard Data Loaded:', {
       projects: projList.length,
       contacts: cont.length,
-      logs: logsData.length
+      logs: logsData.length,
+      filters: { searchTerm, statusFilter, chainFilter }
     })
 
     const groupedContacts = {}
@@ -546,8 +565,8 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    loadData()
-  }, [loadData])
+    loadData(search, filterStatus, filterChain)
+  }, [loadData, search, filterStatus, filterChain])
 
   const handleStatusUpdate = (id, newStatus) => {
     setProjects(prev => prev.map(p => p.id === id ? { ...p, status: newStatus } : p))
@@ -579,15 +598,12 @@ export default function App() {
     channel: log.contacts?.platform || 'Unknown',
   }))
 
+  // Клиентская фильтрация только для segment и quickFilters (не для search, status, chain)
   const filtered = projects.filter(project => {
-    const q = search.toLowerCase()
     const latestLog = latestLogByProject[project.id]
     const projectContacts = contacts[project.id] || []
 
-    const matchSearch = !q || project.name.toLowerCase().includes(q) || (project.ticker || '').toLowerCase().includes(q)
-    const matchChain = filterChain === 'Все' || project.chain === filterChain
-    const matchStatus = filterStatus === 'Все' || project.status === filterStatus
-
+    // Фильтр по segment
     let matchSeg = true
     if (segment === 'priority') matchSeg = project.is_priority
     if (segment === 'upcoming') matchSeg = isUpcomingProject(project)
@@ -595,13 +611,14 @@ export default function App() {
     if (segment === 'other') matchSeg = !project.is_priority && !['Ethereum', 'BNB Chain', 'Arbitrum', 'Polygon'].includes(project.chain)
     if (segment === 'followup') matchSeg = pendingFollowUps.some(item => item.id === project.id)
 
+    // Quick filters
     const matchPriority = !quickFilters.priority || PRIORITY_CHAINS.has(project.chain)
     const matchWhales = !quickFilters.whales || Number(project.mcap || 0) > 1_000_000
     const matchStale = !quickFilters.stale || isStaleProject(project, latestLog)
     const matchHasContacts = !quickFilters.hasContacts || projectContacts.length > 0
     const matchHasEmail = !quickFilters.hasEmail || projectContacts.some(c => c.platform === 'Email')
 
-    return matchSearch && matchChain && matchStatus && matchSeg && matchPriority && matchWhales && matchStale && matchHasContacts && matchHasEmail
+    return matchSeg && matchPriority && matchWhales && matchStale && matchHasContacts && matchHasEmail
   })
 
   const counts = {
