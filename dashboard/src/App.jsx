@@ -480,7 +480,7 @@ export default function App() {
   const [filterChain, setChain] = useState('Все')
   const [filterStatus, setStatus] = useState('Все')
   const [segment, setSegment] = useState('all')
-  const [quickFilters, setQuickFilters] = useState({ priority: false, whales: false, stale: false })
+  const [quickFilters, setQuickFilters] = useState({ priority: false, whales: false, stale: false, hasContacts: false, hasEmail: false })
   const [toast, setToast] = useState(null)
   const [modalProject, setModal] = useState(null)
 
@@ -570,6 +570,7 @@ export default function App() {
   const filtered = projects.filter(project => {
     const q = search.toLowerCase()
     const latestLog = latestLogByProject[project.id]
+    const projectContacts = contacts[project.id] || []
 
     const matchSearch = !q || project.name.toLowerCase().includes(q) || (project.ticker || '').toLowerCase().includes(q)
     const matchChain = filterChain === 'Все' || project.chain === filterChain
@@ -585,8 +586,10 @@ export default function App() {
     const matchPriority = !quickFilters.priority || PRIORITY_CHAINS.has(project.chain)
     const matchWhales = !quickFilters.whales || Number(project.mcap || 0) > 1_000_000
     const matchStale = !quickFilters.stale || isStaleProject(project, latestLog)
+    const matchHasContacts = !quickFilters.hasContacts || projectContacts.length > 0
+    const matchHasEmail = !quickFilters.hasEmail || projectContacts.some(c => c.platform === 'Email')
 
-    return matchSearch && matchChain && matchStatus && matchSeg && matchPriority && matchWhales && matchStale
+    return matchSearch && matchChain && matchStatus && matchSeg && matchPriority && matchWhales && matchStale && matchHasContacts && matchHasEmail
   })
 
   const counts = {
@@ -598,17 +601,22 @@ export default function App() {
     followup: pendingFollowUps.length,
   }
 
+  const projectsWithContacts = projects.filter(p => (contacts[p.id] || []).length > 0).length
+  const projectsWithEmail = projects.filter(p => (contacts[p.id] || []).some(c => c.platform === 'Email')).length
+
   const kpis = [
     { label: 'Total Projects', value: projects.length, tone: 'default' },
-    { label: 'Sent Today', value: sentTodayCount, tone: 'blue' },
-    { label: 'Pending Follow-ups', value: pendingFollowUps.length, tone: 'orange' },
-    { label: 'Conversion Rate', value: `${convRate}%`, tone: 'green' },
+    { label: 'With Contacts', value: projectsWithContacts, tone: 'blue' },
+    { label: 'With Email', value: projectsWithEmail, tone: 'green' },
+    { label: 'Conversion Rate', value: `${convRate}%`, tone: 'orange' },
   ]
 
   const quickFilterOptions = [
     { key: 'priority', label: 'Priority' },
     { key: 'whales', label: 'Whales $1M+' },
     { key: 'stale', label: 'Needs Attention' },
+    { key: 'hasContacts', label: 'Has Contacts' },
+    { key: 'hasEmail', label: 'Has Email' },
   ]
 
   return (
