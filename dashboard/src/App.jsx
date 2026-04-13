@@ -476,21 +476,81 @@ export default function App() {
   const [contacts, setContacts] = useState({})
   const [allLogs, setAllLogs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
   const [search, setSearch] = useState('')
   const [filterChain, setChain] = useState('Все')
   const [filterStatus, setStatus] = useState('Все')
+  const [filterDate, setFilterDate] = useState('Все время')
   const [segment, setSegment] = useState('all')
   const [quickFilters, setQuickFilters] = useState({ priority: false, whales: false, stale: false, hasContacts: false, hasEmail: false })
   const [toast, setToast] = useState(null)
   const [modalProject, setModal] = useState(null)
+  const [hasMore, setHasMore] = useState(true)
+  const [offset, setOffset] = useState(0)
 
   const showToast = (msg) => {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
   }
 
-  const loadData = useCallback(async (searchTerm = '', statusFilter = 'Все', chainFilter = 'Все') => {
-    setLoading(true)
+  const exportToCSV = (projectsList) => {
+    if (!projectsList || projectsList.length === 0) {
+      showToast('Нет данных для экспорта')
+      return
+    }
+
+    // CSV заголовки
+    const headers = ['Project', 'Ticker', 'Chain', 'MCap', 'Status', 'Website', 'Email', 'Telegram', 'Twitter']
+    
+    // Формируем строки CSV
+    const rows = projectsList.map(project => {
+      const projectContacts = contacts[project.id] || []
+      const email = projectContacts.find(c => c.platform === 'Email')?.value || ''
+      const telegram = projectContacts.find(c => c.platform === 'Telegram')?.value || ''
+      const twitter = projectContacts.find(c => c.platform === 'X / Twitter')?.value || ''
+      const website = projectContacts.find(c => c.platform === 'Website')?.value || project.website || ''
+      
+      return [
+        `"${project.name || ''}"`,
+        `"${project.ticker || ''}"`,
+        `"${project.chain || ''}"`,
+        project.mcap || 0,
+        `"${project.status || ''}"`,
+        `"${website}"`,
+        `"${email}"`,
+        `"${telegram}"`,
+        `"${twitter}"`
+      ].join(',')
+    })
+
+    // Объединяем заголовки и строки
+    const csvContent = [headers.join(','), ...rows].join('\n')
+
+    // Создаем Blob и скачиваем файл
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
+    const link = document.createElement('a')
+    const url = URL.createObjectURL(blob)
+    
+    link.setAttribute('href', url)
+    link.setAttribute('download', `ttm-leads-${new Date().toISOString().split('T')[0]}.csv`)
+    link.style.visibility = 'hidden'
+    
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+
+    showToast(`Экспортировано ${projectsList.length} проектов`)
+  }
+
+  const loadData = useCallback(async (searchTerm = '', statusFilter = 'Все', chainFilter = 'Все', dateFilter = 'Все время', isLoadMore = false) => {
+    if (isLoadMore) {
+      setLoadingMore(true)
+    } else {
+      setLoading(true)
+      setOffset(0)
+    }
+
+    const currentOffset = isLoadMore ? offset : 0
 
     // Строим запрос с фильтрами на стороне Supabase
     let query = supabase
@@ -512,17 +572,40 @@ export default function App() {
       query = query.eq('chain', chainFilter)
     }
 
-    const { data: proj } = await query
+    // Фильтр по дате
+    if (dateFilter !== 'Все время') {
+      const now = new Date()
+      let dateThreshold
+      if (dateFilter === 'За последние 3 дня') {
+        dateThreshold = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000)
+      } else if (dateFilter === 'За последние 7 дней') {
+        dateThreshold = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000)
+      }
+      if (dateThreshold) {
+        query = query.gte('created_at', dateThreshold.toISOString())
+      }
+    }
+
+    const { data: proj, count } = await query
       .order('created_at', { ascending: false })
-      .limit(100)
+      .range(currentOffset, currentOffset + 99)
 
     const projList = proj || []
-    setProjects(projList)
+    
+    if (isLoadMore) {
+      setProjects(prev => [...prev, ...projList])
+      setOffset(currentOffset + 100)
+    } else {
+      setProjects(projList)
+    }
 
-    if (projList.length === 0) {
+    setHasMore(projList.length === 100 && (count || 0) > currentOffset + 100)
+
+    if (projList.length === 0 && !isLoadMore) {
       setContacts({})
       setAllLogs([])
       setLoading(false)
+      setLoadingMore(false)
       return
     }
 
@@ -542,7 +625,9 @@ export default function App() {
       projects: projList.length,
       contacts: cont.length,
       logs: logsData.length,
-      filters: { searchTerm, statusFilter, chainFilter }
+      filters: { searchTerm, statusFilter, chainFilter, dateFilter },
+      offset: currentOffset,
+      hasMore: projList.length === 100
     })
 
     const groupedContacts = {}
@@ -550,6 +635,12 @@ export default function App() {
       if (!groupedContacts[c.project_id]) groupedContacts[c.project_id] = []
       groupedContacts[c.project_id].push(c)
     })
+
+    if (isLoadMore) {
+      setContacts(prev => ({ ...prev, ...groupedContacts }))
+    } else {
+      setContacts(groupedContacts)
+    }
 
     console.log('📊 Grouped Contacts:', {
       projectsWithContacts: Object.keys(groupedContacts).length,
@@ -559,14 +650,23 @@ export default function App() {
     const allowedProjectIds = new Set(ids)
     const filteredLogs = logsData.filter(log => allowedProjectIds.has(log.contacts?.project_id))
 
-    setContacts(groupedContacts)
-    setAllLogs(filteredLogs)
+    if (isLoadMore) {
+      setAllLogs(prev => [...prev, ...filteredLogs])
+    } else {
+      setAllLogs(filteredLogs)
+    }
+
     setLoading(false)
-  }, [])
+    setLoadingMore(false)
+  }, [offset])
 
   useEffect(() => {
-    loadData(search, filterStatus, filterChain)
-  }, [loadData, search, filterStatus, filterChain])
+    loadData(search, filterStatus, filterChain, filterDate, false)
+  }, [search, filterStatus, filterChain, filterDate])
+
+  const handleLoadMore = () => {
+    loadData(search, filterStatus, filterChain, filterDate, true)
+  }
 
   const handleStatusUpdate = (id, newStatus) => {
     setProjects(prev => prev.map(p => p.id === id ? { ...p, status: newStatus } : p))
@@ -734,7 +834,12 @@ export default function App() {
             <option value="Все">Все статусы</option>
             {STATUS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
           </select>
-          <button className="btn-copy" onClick={loadData}>↻ Обновить</button>
+          <select className="filter-select" value={filterDate} onChange={e => setFilterDate(e.target.value)}>
+            <option value="Все время">Все время</option>
+            <option value="За последние 3 дня">За последние 3 дня</option>
+            <option value="За последние 7 дней">За последние 7 дней</option>
+          </select>
+          <button className="btn-copy" onClick={() => exportToCSV(filtered)}>📥 Экспорт CSV</button>
         </div>
 
         <div className="quick-filters">
@@ -851,6 +956,19 @@ export default function App() {
             </tbody>
           </table>
         </div>
+
+        {hasMore && !loading && (
+          <div style={{ marginTop: '24px', textAlign: 'center' }}>
+            <button 
+              className="btn-copy" 
+              onClick={handleLoadMore}
+              disabled={loadingMore}
+              style={{ padding: '12px 24px', fontSize: '14px' }}
+            >
+              {loadingMore ? '⏳ Загрузка...' : '📥 Загрузить еще 100 проектов'}
+            </button>
+          </div>
+        )}
 
         <div style={{ marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textAlign: 'right' }}>
           Показано {filtered.length} из {projects.length} проектов
