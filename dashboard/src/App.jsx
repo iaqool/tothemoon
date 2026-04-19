@@ -556,6 +556,9 @@ export default function App() {
                   setRefreshProgress('')
                   setRefreshRunUrl('')
                 }, 4000)
+              } else if (statusData.conclusion === 'cancelled') {
+                setRefreshProgress('⚠️ Обновление было отменено или заменено другим запуском. Проверьте GitHub Actions.')
+                showToast('Обновление отменено')
               } else {
                 setRefreshProgress(`❌ Обновление завершилось с ошибкой: ${statusData.conclusion || 'unknown'}`)
                 showToast('Обновление завершилось с ошибкой')

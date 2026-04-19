@@ -11,6 +11,19 @@ export default async function handler(req, res) {
   }
 
   try {
+    const beforeRunsResponse = await fetch(
+      `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/lead-refresh.yml/runs?event=workflow_dispatch&branch=main&per_page=5`,
+      {
+        headers: {
+          'Accept': 'application/vnd.github.v3+json',
+          'Authorization': `Bearer ${GITHUB_TOKEN}`,
+        }
+      }
+    )
+
+    const beforeRunsData = await beforeRunsResponse.json()
+    const knownRunIds = new Set((beforeRunsData.workflow_runs || []).map(run => run.id))
+
     // Запускаем workflow "Lead Refresh" через GitHub API
     const response = await fetch(
       `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/lead-refresh.yml/dispatches`,
@@ -40,19 +53,29 @@ export default async function handler(req, res) {
       })
     }
 
-    // Получаем последний запуск workflow для отслеживания
-    const runsResponse = await fetch(
-      `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/lead-refresh.yml/runs?per_page=1`,
-      {
-        headers: {
-          'Accept': 'application/vnd.github.v3+json',
-          'Authorization': `Bearer ${GITHUB_TOKEN}`,
-        }
+    let latestRun = null
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise(resolve => setTimeout(resolve, 2000))
       }
-    )
 
-    const runsData = await runsResponse.json()
-    const latestRun = runsData.workflow_runs?.[0]
+      const runsResponse = await fetch(
+        `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/lead-refresh.yml/runs?event=workflow_dispatch&branch=main&per_page=10`,
+        {
+          headers: {
+            'Accept': 'application/vnd.github.v3+json',
+            'Authorization': `Bearer ${GITHUB_TOKEN}`,
+          }
+        }
+      )
+
+      const runsData = await runsResponse.json()
+      latestRun = (runsData.workflow_runs || []).find(run => !knownRunIds.has(run.id)) || null
+
+      if (latestRun) {
+        break
+      }
+    }
 
     return res.status(200).json({ 
       success: true,
