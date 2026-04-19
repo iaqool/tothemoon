@@ -487,10 +487,62 @@ export default function App() {
   const [modalProject, setModal] = useState(null)
   const [hasMore, setHasMore] = useState(true)
   const [offset, setOffset] = useState(0)
+  const [refreshing, setRefreshing] = useState(false)
+  const [refreshProgress, setRefreshProgress] = useState('')
 
   const showToast = (msg) => {
     setToast(msg)
     setTimeout(() => setToast(null), 3000)
+  }
+
+  const triggerRefresh = async () => {
+    setRefreshing(true)
+    setRefreshProgress('Запуск обновления...')
+
+    try {
+      const response = await fetch('/api/trigger-refresh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      })
+
+      const data = await response.json()
+
+      if (response.ok) {
+        setRefreshProgress('✓ Обновление запущено! Ожидаемое время: 5-10 минут')
+        showToast('Обновление контактов запущено')
+        
+        // Таймер обратного отсчета
+        let seconds = 0
+        const timer = setInterval(() => {
+          seconds += 10
+          const minutes = Math.floor(seconds / 60)
+          const secs = seconds % 60
+          setRefreshProgress(`⏳ Обновление в процессе... ${minutes}:${secs.toString().padStart(2, '0')}`)
+          
+          // Останавливаем через 10 минут
+          if (seconds >= 600) {
+            clearInterval(timer)
+            setRefreshProgress('✓ Обновление завершено! Обновите страницу.')
+            setRefreshing(false)
+            // Автоматически перезагружаем данные
+            setTimeout(() => {
+              loadData(search, filterStatus, filterChain, filterDate, false)
+              setRefreshProgress('')
+            }, 2000)
+          }
+        }, 10000) // Обновляем каждые 10 секунд
+
+      } else {
+        setRefreshProgress(`❌ Ошибка: ${data.error}`)
+        setRefreshing(false)
+        showToast('Ошибка запуска обновления')
+      }
+    } catch (error) {
+      console.error('Refresh error:', error)
+      setRefreshProgress('❌ Ошибка соединения с сервером')
+      setRefreshing(false)
+      showToast('Ошибка запуска обновления')
+    }
   }
 
   const exportToCSV = (projectsList) => {
@@ -817,6 +869,12 @@ export default function App() {
           </div>
         )}
 
+        {refreshProgress && (
+          <div className="followup-banner" style={{ background: 'var(--accent-blue)', marginBottom: '16px' }}>
+            {refreshProgress}
+          </div>
+        )}
+
         <div className="filters-bar">
           <div className="search-box">
             <span className="search-icon">⌕</span>
@@ -839,6 +897,14 @@ export default function App() {
             <option value="За последние 3 дня">За последние 3 дня</option>
             <option value="За последние 7 дней">За последние 7 дней</option>
           </select>
+          <button 
+            className="btn-copy" 
+            onClick={triggerRefresh}
+            disabled={refreshing}
+            style={{ background: refreshing ? 'var(--text-muted)' : 'var(--accent-blue)' }}
+          >
+            {refreshing ? '⏳ Обновление...' : '🔄 Обновить контакты'}
+          </button>
           <button className="btn-copy" onClick={() => exportToCSV(filtered)}>📥 Экспорт CSV</button>
         </div>
 
