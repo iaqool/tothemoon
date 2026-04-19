@@ -489,6 +489,7 @@ export default function App() {
   const [offset, setOffset] = useState(0)
   const [refreshing, setRefreshing] = useState(false)
   const [refreshProgress, setRefreshProgress] = useState('')
+  const [refreshRunUrl, setRefreshRunUrl] = useState('')
 
   const showToast = (msg) => {
     setToast(msg)
@@ -498,6 +499,7 @@ export default function App() {
   const triggerRefresh = async () => {
     setRefreshing(true)
     setRefreshProgress('Запуск обновления...')
+    setRefreshRunUrl('')
 
     try {
       const response = await fetch('/api/trigger-refresh', {
@@ -508,29 +510,73 @@ export default function App() {
       const data = await response.json()
 
       if (response.ok) {
-        setRefreshProgress('✓ Обновление запущено! Ожидаемое время: 5-10 минут')
+        const runId = data.run_id
+        setRefreshRunUrl(data.run_url || '')
+        setRefreshProgress('✓ Обновление запущено. Проверяем статус workflow...')
         showToast('Обновление контактов запущено')
-        
-        // Таймер обратного отсчета
-        let seconds = 0
-        const timer = setInterval(() => {
-          seconds += 10
-          const minutes = Math.floor(seconds / 60)
-          const secs = seconds % 60
-          setRefreshProgress(`⏳ Обновление в процессе... ${minutes}:${secs.toString().padStart(2, '0')}`)
-          
-          // Останавливаем через 10 минут
-          if (seconds >= 600) {
-            clearInterval(timer)
-            setRefreshProgress('✓ Обновление завершено! Обновите страницу.')
+
+        if (!runId) {
+          setRefreshProgress('⚠️ Workflow запущен, но run_id не найден')
+          setRefreshing(false)
+          return
+        }
+
+        let pollCount = 0
+        const maxPolls = 90
+        const pollInterval = setInterval(async () => {
+          pollCount += 1
+          try {
+            const statusResponse = await fetch(`/api/check-refresh-status?run_id=${runId}`)
+            const statusData = await statusResponse.json()
+
+            if (!statusResponse.ok) {
+              throw new Error(statusData.error || 'Failed to fetch status')
+            }
+
+            setRefreshRunUrl(statusData.run_url || data.run_url || '')
+
+            if (statusData.status === 'queued') {
+              setRefreshProgress('⏳ Обновление в очереди. Ждет предыдущий запуск...')
+              return
+            }
+
+            if (statusData.status === 'in_progress') {
+              setRefreshProgress('🔄 Идет парсинг и обновление контактов... Обычно 5-10 минут')
+              return
+            }
+
+            if (statusData.status === 'completed') {
+              clearInterval(pollInterval)
+
+              if (statusData.conclusion === 'success') {
+                setRefreshProgress('✓ Обновление завершено. Загружаю свежие данные...')
+                await loadData(search, filterStatus, filterChain, filterDate, false)
+                showToast('Контакты успешно обновлены')
+                setTimeout(() => {
+                  setRefreshProgress('')
+                  setRefreshRunUrl('')
+                }, 4000)
+              } else {
+                setRefreshProgress(`❌ Обновление завершилось с ошибкой: ${statusData.conclusion || 'unknown'}`)
+                showToast('Обновление завершилось с ошибкой')
+              }
+
+              setRefreshing(false)
+              return
+            }
+
+            if (pollCount >= maxPolls) {
+              clearInterval(pollInterval)
+              setRefreshProgress('⚠️ Статус обновления не дождались вовремя. Проверьте GitHub Actions.')
+              setRefreshing(false)
+            }
+          } catch (pollError) {
+            clearInterval(pollInterval)
+            console.error('Refresh status poll error:', pollError)
+            setRefreshProgress('❌ Не удалось получить статус обновления')
             setRefreshing(false)
-            // Автоматически перезагружаем данные
-            setTimeout(() => {
-              loadData(search, filterStatus, filterChain, filterDate, false)
-              setRefreshProgress('')
-            }, 2000)
           }
-        }, 10000) // Обновляем каждые 10 секунд
+        }, 10000)
 
       } else {
         setRefreshProgress(`❌ Ошибка: ${data.error}`)
@@ -871,7 +917,19 @@ export default function App() {
 
         {refreshProgress && (
           <div className="followup-banner" style={{ background: 'var(--accent-blue)', marginBottom: '16px' }}>
-            {refreshProgress}
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+              <span>{refreshProgress}</span>
+              {refreshRunUrl && (
+                <a
+                  href={refreshRunUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: 'white', fontWeight: 700, textDecoration: 'underline' }}
+                >
+                  Открыть GitHub Actions
+                </a>
+              )}
+            </div>
           </div>
         )}
 
