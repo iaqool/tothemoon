@@ -278,12 +278,23 @@ def get_project_website(project: dict) -> str:
         return website
 
 
+def _safe_fetch(url: str, headers: dict, timeout: int = 8, max_redirects: int = 5) -> requests.Response | None:
+    """Follow redirects manually, validating each hop against SSRF."""
+    for _ in range(max_redirects):
+        if not is_safe_url(url):
+            return None
+        r = requests.get(url, headers=headers, timeout=timeout, allow_redirects=False)
+        if r.is_redirect and "Location" in r.headers:
+            url = urljoin(url, r.headers["Location"])
+            continue
+        return r
+    return None
+
+
 def fetch_page(url: str, headers: dict) -> tuple[str, BeautifulSoup | None]:
-    if not is_safe_url(url):
-        return "", None
     try:
-        r = requests.get(url, headers=headers, timeout=8, allow_redirects=False)
-        if r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
+        r = _safe_fetch(url, headers)
+        if r is None or r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
             return "", None
         return r.text, BeautifulSoup(r.text, "html.parser")
     except Exception:
