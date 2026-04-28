@@ -1,218 +1,145 @@
-# TTM Lead Gen
+# Tothemoon — BD Autopilot for Crypto Projects
 
-Internal lead generation and outreach pipeline for Tothemoon.
+Automated pipeline that finds new crypto projects, discovers decision-maker contacts, writes personalized cold emails with AI, and sends them with follow-ups — on full autopilot.
 
-The system combines:
-- `Supabase` as the source of truth
-- `React + Vite` dashboard for pipeline management
-- `Vercel Functions` for Smart Reply generation with Gemini
-- `Python workers` for scraping, enrichment, briefing, and outreach
-- `GitHub Actions` for scheduled background runs
+## What It Does
 
-## Architecture
-
-### Dashboard
-- Path: `dashboard/`
-- Stack: `React`, `Vite`, `@supabase/supabase-js`
-- Purpose: manage leads, filter pipeline, log outreach, generate Smart Reply
-
-### Background Workers
-- `scraper.py`: pulls new crypto projects into Supabase
-- `scraper_upcoming.py`: pulls pre-launch token sales from ICO Drops
-- `enricher.py`: finds contacts, prioritizes email and decision makers
-- `briefing.py`: prints a daily pipeline briefing
-- `auto_outreach.py`: sends Stage 1 and follow-up emails
-- `pipeline.py`: runs scraper + enricher + briefing together
-
-### Scheduled Automation
-- `.github/workflows/lead-refresh.yml`
-  - runs every 6 hours
-  - supports manual run with `email_only` or `full` mode
-  - writes a summary to GitHub Actions
-- `.github/workflows/outreach.yml`
-  - runs the automated outreach cycle
-  - writes a summary to GitHub Actions
-
-## Data Model
-
-Main tables are defined in `schema.sql`:
-- `projects`
-- `contacts`
-- `outreach_logs`
-
-If you added new fields such as `is_upcoming`, `launch_date`, or `launchpad`, apply `schema.sql` in the Supabase SQL editor so the dashboard and workers can store full upcoming-sale metadata.
-
-Supabase is the shared backend for both the dashboard and background jobs.
-
-## Local Setup
-
-### 1. Python workers
-
-Create `.env` in the repository root.
-
-Required values:
-
-```env
-SUPABASE_URL=
-SUPABASE_KEY=
-SERPER_API_KEY=
-GEMINI_API_KEY=
-RESEND_API_KEY=
-CG_API_KEY=
+```
+CoinGecko / ICO Drops
+        |
+   [ Scraper ]  ──  finds new projects (MCap > $100k, 12 chains)
+        |
+   [ Enricher ] ──  finds BD / Founder / Listing Manager contacts
+        |               via Serper.dev search + website parsing
+        |
+  [ AI Generator ] ── writes personalized icebreaker (Gemini)
+        |
+   [ Sender ]   ──  sends cold email via Resend
+        |
+   [ Follow-ups ] ── auto follow-up at day 4 and day 10
+        |
+   [ Dashboard ]  ── Vercel app to view pipeline, manage leads,
+                      log manual outreach (X / TG), generate Smart Reply
 ```
 
-Install dependencies:
+**Supported chains:** Solana, TON, Base, Ethereum, BNB Chain, Tron, Arbitrum, Polygon, Optimism, Injective, Stellar, Celo
+**Priority chains** (auto-flagged): Solana, TON, Base
+
+## What Runs Automatically
+
+| What | When | How |
+|------|------|-----|
+| Scrape new projects (CoinGecko + ICO Drops) | Every 6 hours | GitHub Actions `lead-refresh.yml` |
+| Enrich contacts (email, X, TG, LinkedIn) | Every 6 hours (after scrape) | GitHub Actions `lead-refresh.yml` |
+| Send cold emails (Stage 1) | Daily at 08:30 UTC | GitHub Actions `outreach.yml` |
+| Send follow-ups (day 4 + day 10) | Daily at 08:30 UTC | GitHub Actions `outreach.yml` |
+
+**What you do manually:** review leads in dashboard, do X/TG outreach, handle replies, adjust priority.
+
+## Quick Start
+
+### 1. Set up Supabase
+
+Create a project at [supabase.com](https://supabase.com). Run `schema.sql` in the SQL Editor.
+
+### 2. Configure environment
+
+Copy `.env.example` to `.env` and fill in your keys:
+
+| Variable | Where to get | Used by |
+|----------|-------------|---------|
+| `SUPABASE_URL` | Supabase → Settings → API | Everything |
+| `SUPABASE_KEY` | Supabase → Settings → API (anon key) | Everything |
+| `SERPER_API_KEY` | [serper.dev](https://serper.dev) (free: 2500 req/mo) | Enricher |
+| `GEMINI_API_KEY` | [Google AI Studio](https://aistudio.google.com/apikey) | AI icebreakers |
+| `RESEND_API_KEY` | [resend.com](https://resend.com) | Email sending |
+| `CG_API_KEY` | [CoinGecko](https://www.coingecko.com/en/api) (optional, demo works) | Scraper |
+| `API_SECRET` | Generate yourself (`openssl rand -hex 32`) | API endpoint auth |
+
+### 3. Run locally
 
 ```bash
 pip install -r requirements.txt
+python pipeline.py            # scrape + enrich + briefing
+python pipeline.py --outreach # + send emails
 ```
 
-Run the full local pipeline:
-
+Dashboard:
 ```bash
-py pipeline.py
+cd dashboard && npm install && npm run dev
+# Open http://localhost:5173
 ```
 
-Run pipeline with outreach:
+## Deploy to Production
 
-```bash
-py pipeline.py --outreach
+### Dashboard → Vercel
+
+Deploy `dashboard/` directory. Set env vars:
+
+```
+VITE_SUPABASE_URL, VITE_SUPABASE_KEY, GEMINI_API_KEY, API_SECRET, VITE_API_SECRET
 ```
 
-Useful one-off commands:
+`VITE_API_SECRET` must equal `API_SECRET` — the dashboard uses it to authenticate API calls.
 
-```bash
-py scraper.py
-py scraper_upcoming.py
-py -c "import enricher; enricher.run(limit=30)"
-py -c "import enricher; enricher.run(limit=30, email_only=True)"
-py auto_outreach.py
-py briefing.py
+### Workers → GitHub Actions
+
+Add these as repository secrets:
+
+```
+SUPABASE_URL, SUPABASE_KEY, SERPER_API_KEY, CG_API_KEY, GEMINI_API_KEY, RESEND_API_KEY
 ```
 
-### 2. Dashboard
+Workers run on schedule automatically. Manual trigger available in Actions tab.
 
-Create `dashboard/.env`:
+### Email → Custom domain
 
-```env
-VITE_SUPABASE_URL=
-VITE_SUPABASE_KEY=
-```
+Outreach requires a verified sending domain:
+1. Buy a domain (e.g. `tothemoon.agency`)
+2. Set up DNS records (SPF, DKIM, DMARC) in Resend
+3. Update `SENDER_EMAIL` in `sender.py`
+4. Uncomment `schedule` in `outreach.yml`
 
-Install frontend dependencies:
+## Pipeline Components
 
-```bash
-cd dashboard
-npm install
-```
+| File | Purpose |
+|------|---------|
+| `scraper.py` | Pulls live projects from CoinGecko API |
+| `scraper_upcoming.py` | Scrapes upcoming token sales from ICO Drops |
+| `enricher.py` | Finds contacts via search + website parsing |
+| `ai_generator.py` | Generates personalized email openers (Gemini) |
+| `sender.py` | Sends emails via Resend API |
+| `auto_outreach.py` | Orchestrates cold emails + follow-ups |
+| `briefing.py` | Prints daily pipeline summary |
+| `pipeline.py` | Runs scraper → enricher → briefing in sequence |
+| `dashboard/` | React app for pipeline management |
+| `dashboard/api/` | Vercel serverless functions (Smart Reply, workflow trigger) |
 
-Run locally:
+## Data Model
 
-```bash
-npm run dev
-```
+Three tables in Supabase (defined in `schema.sql`):
 
-Build locally:
+- **projects** — scraped crypto projects with chain, MCap, status, priority flag
+- **contacts** — found people (email, X, TG, LinkedIn) linked to projects
+- **outreach_logs** — sent emails and responses, linked to contacts
 
-```bash
-npm run build
-```
+Project status flow: `not_contacted` → `contacted` → `replied` / `follow_up` / `no_response`
 
-## Enricher Modes
+## Outreach Logic
 
-`enricher.py` supports two practical modes:
+- **Stage 1 (Cold):** AI-personalized email to best available contact (prefers Founder/BD)
+- **Follow-up 1:** 4 days after Stage 1, if no reply
+- **Follow-up 2:** 10 days after Stage 1, if still no reply
+- Domain deduplication: won't email two tokens from same team in one run
+- Daily limits configurable via `OUTREACH_DAILY_LIMIT` (default: 3)
 
-### Full mode
+## Troubleshooting
 
-```bash
-py -c "import enricher; enricher.run(limit=30, email_only=False)"
-```
-
-Finds:
-- `Email`
-- `LinkedIn`
-- `X / Twitter`
-- `Telegram`
-
-### Email-only mode
-
-```bash
-py -c "import enricher; enricher.run(limit=30, email_only=True)"
-```
-
-Optimized for auto outreach. Prioritizes:
-- projects with `mcap > $1M`
-- projects without `Email`
-- docs / media-kit / partnerships / press pages
-
-## Vercel Deployment
-
-Deploy `dashboard/` to Vercel.
-
-Set these environment variables in Vercel:
-
-```env
-VITE_SUPABASE_URL=
-VITE_SUPABASE_KEY=
-GEMINI_API_KEY=
-```
-
-Notes:
-- `GEMINI_API_KEY` is used by `dashboard/api/generate-reply.js`
-- client-side Supabase keys must be the frontend-safe keys you intend to expose
-
-## GitHub Actions Setup
-
-Repository secrets required for background workflows:
-
-```env
-SUPABASE_URL
-SUPABASE_KEY
-SERPER_API_KEY
-CG_API_KEY
-GEMINI_API_KEY
-RESEND_API_KEY
-```
-
-### Lead Refresh
-
-Workflow: `.github/workflows/lead-refresh.yml`
-
-Manual options:
-- `mode = email_only`
-- `mode = full`
-- `enrich_limit = 30/50/100`
-
-Output:
-- new emails found
-- new founders found
-- new BD / Listing contacts found
-- priority leads summary
-
-### Outreach Cycle
-
-Workflow: `.github/workflows/outreach.yml`
-
-Output:
-- Stage 1 sent
-- Follow-up 1 sent
-- Follow-up 2 sent
-- recent activity summary
-
-## Current Operational Model
-
-Recommended usage:
-
-1. `Lead Refresh` runs every 6 hours in GitHub Actions
-2. Dashboard on Vercel shows current pipeline state
-3. Manual outreach is done through dashboard for `X / TG`
-4. Email autopilot uses `auto_outreach.py`
-5. Upcoming token sales are imported before CoinGecko listings hit the market
-6. Smart Reply is generated via Vercel serverless function
-
-## Notes
-
-- Vercel is used for UI and fast AI endpoints, not long-running Python jobs
-- GitHub Actions is used for scheduled scraping, enrichment, and outreach
-- Supabase remains the single shared backend
-- Do not print secrets in workflow logs
+| Problem | Fix |
+|---------|-----|
+| CoinGecko blocks GitHub Actions IP | Pre-existing — scraper has `continue-on-error: true`, enricher still runs |
+| Emails going to spam | Need verified custom domain with SPF/DKIM/DMARC |
+| Dashboard shows no data | Check `VITE_SUPABASE_URL` and `VITE_SUPABASE_KEY` in Vercel env vars |
+| "Refresh Leads" button fails | Set `GITHUB_TOKEN` and `GITHUB_REPO` in Vercel env vars |
+| Enricher finds no emails | Normal for some projects — not every site exposes BD contacts |
+| Smart Reply returns fallback | `GEMINI_API_KEY` not set or quota exceeded — fallback template is used |
