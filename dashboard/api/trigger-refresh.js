@@ -3,11 +3,31 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' })
   }
 
-  const GITHUB_TOKEN = process.env.GITHUB_TOKEN
-  const GITHUB_REPO = process.env.GITHUB_REPO || 'iaqool/tothemoon'
+  // --- Auth: require API_SECRET ---
+  const API_SECRET = process.env.API_SECRET
+  if (API_SECRET) {
+    const auth = req.headers['authorization']
+    if (auth !== `Bearer ${API_SECRET}`) {
+      return res.status(401).json({ error: 'Unauthorized' })
+    }
+  }
 
-  if (!GITHUB_TOKEN) {
-    return res.status(500).json({ error: 'GitHub token not configured' })
+  // --- Request size guard ---
+  const body = JSON.stringify(req.body || {})
+  if (body.length > 1024) {
+    return res.status(413).json({ error: 'Payload too large' })
+  }
+
+  const GITHUB_TOKEN = process.env.GITHUB_TOKEN
+  const GITHUB_REPO = process.env.GITHUB_REPO
+
+  if (!GITHUB_TOKEN || !GITHUB_REPO) {
+    return res.status(500).json({ error: 'Server configuration incomplete' })
+  }
+
+  // --- Validate GITHUB_REPO format ---
+  if (!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(GITHUB_REPO)) {
+    return res.status(500).json({ error: 'Invalid repository configuration' })
   }
 
   try {
@@ -24,7 +44,6 @@ export default async function handler(req, res) {
     const beforeRunsData = await beforeRunsResponse.json()
     const knownRunIds = new Set((beforeRunsData.workflow_runs || []).map(run => run.id))
 
-    // Запускаем workflow "Lead Refresh" через GitHub API
     const response = await fetch(
       `https://api.github.com/repos/${GITHUB_REPO}/actions/workflows/lead-refresh.yml/dispatches`,
       {
@@ -45,12 +64,7 @@ export default async function handler(req, res) {
     )
 
     if (!response.ok) {
-      const errorText = await response.text()
-      console.error('GitHub API Error:', errorText)
-      return res.status(response.status).json({ 
-        error: 'Failed to trigger workflow',
-        details: errorText
-      })
+      return res.status(502).json({ error: 'Failed to trigger workflow' })
     }
 
     let latestRun = null
@@ -82,14 +96,11 @@ export default async function handler(req, res) {
       message: 'Lead refresh started',
       run_id: latestRun?.id,
       run_url: latestRun?.html_url,
-      estimated_time: '5-10 минут'
+      estimated_time: '5-10 minutes'
     })
 
   } catch (error) {
-    console.error('Trigger Error:', error)
-    return res.status(500).json({ 
-      error: 'Internal server error',
-      details: error.message
-    })
+    console.error('Trigger Error:', error.message)
+    return res.status(500).json({ error: 'Internal server error' })
   }
 }

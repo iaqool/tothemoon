@@ -1,4 +1,6 @@
 import os
+import re
+import html as html_module
 import resend
 from dotenv import load_dotenv
 
@@ -14,12 +16,35 @@ SENDER_EMAIL = (
 )
 
 
+def sanitize_for_html(text: str) -> str:
+    """Escape text for safe HTML embedding."""
+    return html_module.escape(str(text)) if text else ""
+
+
+def sanitize_for_text(text: str) -> str:
+    """Strip potentially dangerous characters from plain text."""
+    if not text:
+        return ""
+    return re.sub(r"[\r\n]+", " ", str(text)).strip()
+
+
+def validate_email(email: str) -> bool:
+    """Basic email format validation."""
+    if not email or not isinstance(email, str):
+        return False
+    return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email.strip()))
+
+
 def send_email(
     to_email: str, subject: str, text_content: str, html_content: str = None
 ) -> dict:
     """
     Отправляет email через Resend API.
     """
+    if not validate_email(to_email):
+        print(f"[ERROR] Invalid email address: {to_email}")
+        return None
+
     if not RESEND_API_KEY or RESEND_API_KEY == "your_resend_api_key_here":
         print(f"[MOCK SEND] To: {to_email} | Subject: {subject}")
         print(f"Content:\n{text_content}\n" + "-" * 40)
@@ -58,8 +83,11 @@ The Tothemoon Team
 https://tothemoon.agency
 """
 
-    html = f"""<p>{icebreaker}</p>
-<p>We specialize in helping projects like <strong>{name}</strong> maximize visibility across Tier-1/2 CEXs and build sustained liquidity (spread &lt; 1%, volume &gt; $10k). We have a database of 2M+ users and are a Top-30 agency globally.</p>
+    safe_icebreaker = sanitize_for_html(icebreaker)
+    safe_name = sanitize_for_html(name)
+
+    html = f"""<p>{safe_icebreaker}</p>
+<p>We specialize in helping projects like <strong>{safe_name}</strong> maximize visibility across Tier-1/2 CEXs and build sustained liquidity (spread &lt; 1%, volume &gt; $10k). We have a database of 2M+ users and are a Top-30 agency globally.</p>
 <p>Also, we provide free tools like Listagram bot for automated listing tracking to help your community stay engaged.</p>
 <p>Would love to have a quick 10-min call this week — are you open to it?</p>
 <p>Best,<br>The Tothemoon Team<br><a href="https://tothemoon.agency">tothemoon.agency</a></p>
@@ -86,9 +114,12 @@ The Tothemoon Team
 https://tothemoon.agency
 """
 
-    html = f"""<p>{icebreaker}</p>
+    safe_icebreaker = sanitize_for_html(icebreaker)
+    safe_launchpad_line = sanitize_for_html(launchpad_line)
+
+    html = f"""<p>{safe_icebreaker}</p>
 <p>We work with projects ahead of launch to make sure day-one trading does not break on liquidity. TTM gives teams direct access to <strong>2M+</strong> active traders, Top-30 exchange distribution, and clear MM standards from the first trading session.</p>
-<p>Our baseline is spread &lt; 1%, daily volume &gt; $10k, and stable depth around the mid price. If your team still needs a lightweight MM setup, we can also support with Listagram{launchpad_line}.</p>
+<p>Our baseline is spread &lt; 1%, daily volume &gt; $10k, and stable depth around the mid price. If your team still needs a lightweight MM setup, we can also support with Listagram{safe_launchpad_line}.</p>
 <p>If your sale timeline is already taking shape, happy to prepare a preliminary listing path before launch.</p>
 <p>Best,<br>The Tothemoon Team<br><a href="https://tothemoon.agency">tothemoon.agency</a></p>
 """
