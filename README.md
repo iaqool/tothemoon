@@ -155,10 +155,13 @@ Set these environment variables in Vercel:
 VITE_SUPABASE_URL=
 VITE_SUPABASE_KEY=
 GEMINI_API_KEY=
+GITHUB_TOKEN=<GitHub PAT with repo + workflow scopes>
+GITHUB_REPO=iaqool/tothemoon
 ```
 
 Notes:
 - `GEMINI_API_KEY` is used by `dashboard/api/generate-reply.js`
+- `GITHUB_TOKEN` and `GITHUB_REPO` are required for the "Refresh Leads" button in the dashboard to trigger GitHub Actions workflows
 - client-side Supabase keys must be the frontend-safe keys you intend to expose
 
 ## GitHub Actions Setup

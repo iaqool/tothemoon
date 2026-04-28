@@ -94,7 +94,12 @@ export default async function handler(req, res) {
         return res.status(200).json({ success: true, matchedContacts: contacts.length });
 
     } catch (error) {
-        console.error('[INBOUND ERROR]', error);
+        console.error('[INBOUND ERROR]', JSON.stringify({
+            timestamp: new Date().toISOString(),
+            payload: req.body,
+            message: error.message,
+            stack: error.stack
+        }));
         return res.status(500).json({ error: 'Internal Server Error' });
     }
 }

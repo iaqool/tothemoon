@@ -13,6 +13,8 @@ seen_coins.json
 # Environment
 .env
 .env.local
+.env.vercel
+.env.backup
 
 # Node / Frontend
 node_modules/

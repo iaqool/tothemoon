@@ -76,13 +76,15 @@ jobs:
           PY
 
       - name: Run scraper
+        continue-on-error: true
         run: python scraper.py
 
       - name: Run upcoming scraper
+        continue-on-error: true
         run: python scraper_upcoming.py
 
       - name: Run enricher
-        run: python -c "import os, enricher; enricher.run(limit=int(os.getenv('ENRICH_LIMIT', '30')), email_only=False)"
+        run: python -c "import os, enricher; enricher.run(limit=int(os.getenv('ENRICH_LIMIT', '30')), email_only=os.getenv('ENRICH_MODE') == 'email_only')"
 
       - name: Capture post-run metrics
         id: after_metrics

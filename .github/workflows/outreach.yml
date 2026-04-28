@@ -2,8 +2,8 @@ name: Outreach Cycle
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '30 8 * * *'
+  # schedule:
+  #   - cron: '30 8 * * *'
 
 concurrency:
   group: outreach-cycle

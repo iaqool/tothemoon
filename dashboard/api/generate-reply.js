@@ -57,7 +57,7 @@ export default async function handler(req, res) {
 
   try {
     const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash-exp' })
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
 
     const toneGuideline = ['Solana', 'TON', 'Base'].includes(chain)
       ? 'Use a slightly energetic and informal tone (you can use one emoji like 🚀 or 🔥). These are often memecoins or hype projects.'
@@ -135,7 +135,12 @@ https://tothemoon.agency`
       icebreaker: generatedText 
     })
   } catch (error) {
-    console.error('Gemini API Error:', error)
+    console.error('[GENERATE-REPLY ERROR]', JSON.stringify({
+      timestamp: new Date().toISOString(),
+      payload: { name, chain, mcap, ticker, isUpcoming },
+      message: error.message,
+      stack: error.stack
+    }))
     return res.status(200).json({ 
       reply: fallbackReply,
       fallback: true 

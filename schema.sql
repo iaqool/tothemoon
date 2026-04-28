@@ -67,8 +67,20 @@ CREATE TRIGGER update_projects_updated_at
     EXECUTE PROCEDURE update_updated_at_column();
 
 -- Индексы для быстрого поиска
-CREATE INDEX idx_projects_status ON public.projects(status);
-CREATE INDEX idx_projects_priority ON public.projects(is_priority);
-CREATE INDEX idx_projects_upcoming ON public.projects(is_upcoming);
-CREATE INDEX idx_projects_launch_date ON public.projects(launch_date);
-CREATE INDEX idx_contacts_project_id ON public.contacts(project_id);
+CREATE INDEX IF NOT EXISTS idx_projects_status ON public.projects(status);
+CREATE INDEX IF NOT EXISTS idx_projects_priority ON public.projects(is_priority);
+CREATE INDEX IF NOT EXISTS idx_projects_upcoming ON public.projects(is_upcoming);
+CREATE INDEX IF NOT EXISTS idx_projects_launch_date ON public.projects(launch_date);
+CREATE INDEX IF NOT EXISTS idx_contacts_project_id ON public.contacts(project_id);
+CREATE INDEX IF NOT EXISTS idx_outreach_logs_contact_id ON public.outreach_logs(contact_id);
+CREATE INDEX IF NOT EXISTS idx_outreach_logs_sent_at ON public.outreach_logs(sent_at);
+CREATE INDEX IF NOT EXISTS idx_outreach_logs_stage ON public.outreach_logs(stage);
+
+-- Row Level Security
+ALTER TABLE public.projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contacts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.outreach_logs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "anon full access on projects" ON public.projects FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "anon full access on contacts" ON public.contacts FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "anon full access on outreach_logs" ON public.outreach_logs FOR ALL USING (true) WITH CHECK (true);

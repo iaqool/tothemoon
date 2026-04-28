@@ -71,7 +71,7 @@ def handle_stage_1():
         return
 
     # дневной или run-лимит
-    DAILY_LIMIT = 3
+    DAILY_LIMIT = int(os.getenv("OUTREACH_DAILY_LIMIT", "20"))
     sent_count = 0
     contacted_domains = set()  # для дедупликации доменов
 
@@ -178,13 +178,17 @@ def handle_followups():
 
     # Чтобы найти проекты для Follow-up, нам нужны контакты, по которым мы уже отправляли письма
     # Более надежный путь: найти последние outreach_logs
+    FOLLOWUP_LIMIT = int(os.getenv("OUTREACH_FOLLOWUP_LIMIT", "10"))
+
     try:
-        # Для простоты: берем последние логи (сортировка по sent_at)
+        cutoff = (datetime.utcnow() - timedelta(days=30)).isoformat()
         logs_res = (
             supabase.table("outreach_logs")
             .select(
                 "*, contacts!inner(project_id, platform, value, contact_name, projects!inner(id, name, ticker, status))"
             )
+            .gte("sent_at", cutoff)
+            .limit(500)
             .execute()
         )
 
@@ -222,6 +226,9 @@ def handle_followups():
     followup_count = 0
 
     for pid, log in latest_logs_by_project.items():
+        if followup_count >= FOLLOWUP_LIMIT:
+            print(f"Reached follow-up limit of {FOLLOWUP_LIMIT}. Stopping.")
+            break
         # Сравниваем даты. Supabase использует UTC
         # Так как datetime.fromisoformat оставляет tzinfo (если оно там было, например +00:00)
         # Приведем к naive для простоты сравнения
