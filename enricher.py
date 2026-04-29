@@ -276,12 +276,28 @@ def get_project_website(project: dict) -> str:
         return website
 
 
+def _safe_redirect_get(url: str, headers: dict, max_hops: int = 5) -> requests.Response | None:
+    for _ in range(max_hops):
+        r = requests.get(url, headers=headers, timeout=8, allow_redirects=False)
+        if r.is_redirect or r.status_code in (301, 302, 303, 307, 308):
+            location = r.headers.get("Location", "")
+            if not location:
+                return None
+            next_url = urljoin(url, location)
+            if not is_safe_url(next_url):
+                return None
+            url = next_url
+            continue
+        return r
+    return None
+
+
 def fetch_page(url: str, headers: dict) -> tuple[str, BeautifulSoup | None]:
     if not is_safe_url(url):
         return "", None
     try:
-        r = requests.get(url, headers=headers, timeout=8, allow_redirects=False)
-        if r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
+        r = _safe_redirect_get(url, headers)
+        if r is None or r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
             return "", None
         return r.text, BeautifulSoup(r.text, "html.parser")
     except Exception:

@@ -49,11 +49,12 @@ export default async function handler(req, res) {
 
   // --- Auth: require API_SECRET ---
   const API_SECRET = process.env.API_SECRET
-  if (API_SECRET) {
-    const auth = req.headers['authorization']
-    if (auth !== `Bearer ${API_SECRET}`) {
-      return res.status(401).json({ error: 'Unauthorized' })
-    }
+  if (!API_SECRET) {
+    return res.status(500).json({ error: 'API_SECRET not configured' })
+  }
+  const auth = req.headers['authorization']
+  if (auth !== `Bearer ${API_SECRET}`) {
+    return res.status(401).json({ error: 'Unauthorized' })
   }
 
   // --- Request size guard ---

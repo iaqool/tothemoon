@@ -84,7 +84,7 @@ npm install && npm run dev
 | `GITHUB_TOKEN` | Yes | PAT with `repo` + `workflow` scopes |
 | `GITHUB_REPO` | Yes | e.g. `owner/repo` |
 | `RESEND_WEBHOOK_SECRET` | Yes | Validates `/api/inbound` webhook |
-| `API_SECRET` | Recommended | Protects all API endpoints |
+| `API_SECRET` | Yes | Protects all API endpoints (endpoints return 500 if unset) |
 
 ### GitHub Actions Secrets
 
