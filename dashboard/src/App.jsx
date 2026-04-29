@@ -1,6 +1,13 @@
 import { useState, useEffect, useCallback } from 'react'
 import { supabase } from './lib/supabase'
 
+const API_SECRET = import.meta.env.VITE_API_SECRET || ''
+function apiHeaders() {
+  const h = { 'Content-Type': 'application/json' }
+  if (API_SECRET) h['Authorization'] = `Bearer ${API_SECRET}`
+  return h
+}
+
 /* ─── Constants ────────────────────────────────────────────────────────── */
 const STATUS_OPTIONS = [
   { value: 'not_contacted', label: 'Не написали' },
@@ -320,7 +327,7 @@ function OutreachModal({ project, contacts, onClose, onLogged }) {
     try {
       const res = await fetch('/api/generate-reply', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: apiHeaders(),
         body: JSON.stringify({
           name: project.name,
           chain: project.chain,
@@ -504,7 +511,7 @@ export default function App() {
     try {
       const response = await fetch('/api/trigger-refresh', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' }
+        headers: apiHeaders()
       })
 
       const data = await response.json()
@@ -526,7 +533,7 @@ export default function App() {
         const pollInterval = setInterval(async () => {
           pollCount += 1
           try {
-            const statusResponse = await fetch(`/api/check-refresh-status?run_id=${runId}`)
+            const statusResponse = await fetch(`/api/check-refresh-status?run_id=${runId}`, { headers: apiHeaders() })
             const statusData = await statusResponse.json()
 
             if (!statusResponse.ok) {
@@ -603,7 +610,12 @@ export default function App() {
     // CSV заголовки
     const headers = ['Project', 'Ticker', 'Chain', 'MCap', 'Status', 'Website', 'Email', 'Telegram', 'Twitter']
     
-    // Формируем строки CSV
+    const csvSafe = (val) => {
+      const s = String(val || '').replace(/"/g, '""')
+      if (/^[=+\-@\t\r]/.test(s)) return `"'${s}"`
+      return `"${s}"`
+    }
+
     const rows = projectsList.map(project => {
       const projectContacts = contacts[project.id] || []
       const email = projectContacts.find(c => c.platform === 'Email')?.value || ''
@@ -612,15 +624,15 @@ export default function App() {
       const website = projectContacts.find(c => c.platform === 'Website')?.value || project.website || ''
       
       return [
-        `"${project.name || ''}"`,
-        `"${project.ticker || ''}"`,
-        `"${project.chain || ''}"`,
+        csvSafe(project.name),
+        csvSafe(project.ticker),
+        csvSafe(project.chain),
         project.mcap || 0,
-        `"${project.status || ''}"`,
-        `"${website}"`,
-        `"${email}"`,
-        `"${telegram}"`,
-        `"${twitter}"`
+        csvSafe(project.status),
+        csvSafe(website),
+        csvSafe(email),
+        csvSafe(telegram),
+        csvSafe(twitter)
       ].join(',')
     })
 
@@ -658,9 +670,11 @@ export default function App() {
       .from('projects')
       .select('*', { count: 'exact' })
 
-    // Фильтр по поиску (name или ticker)
     if (searchTerm) {
-      query = query.or(`name.ilike.%${searchTerm}%,ticker.ilike.%${searchTerm}%`)
+      const sanitized = searchTerm.replace(/[%_\\]/g, '')
+      if (sanitized) {
+        query = query.or(`name.ilike.%${sanitized}%,ticker.ilike.%${sanitized}%`)
+      }
     }
 
     // Фильтр по статусу
@@ -722,14 +736,13 @@ export default function App() {
     const cont = contactsResult.data || []
     const logsData = logsResult.data || []
 
-    console.log('📊 Dashboard Data Loaded:', {
-      projects: projList.length,
-      contacts: cont.length,
-      logs: logsData.length,
-      filters: { searchTerm, statusFilter, chainFilter, dateFilter },
-      offset: currentOffset,
-      hasMore: projList.length === 100
-    })
+    if (import.meta.env.DEV) {
+      console.log('Dashboard Data Loaded:', {
+        projects: projList.length,
+        contacts: cont.length,
+        logs: logsData.length,
+      })
+    }
 
     const groupedContacts = {}
     cont.forEach(c => {
@@ -743,10 +756,9 @@ export default function App() {
       setContacts(groupedContacts)
     }
 
-    console.log('📊 Grouped Contacts:', {
-      projectsWithContacts: Object.keys(groupedContacts).length,
-      totalContacts: cont.length
-    })
+    if (import.meta.env.DEV) {
+      console.log('Grouped Contacts:', Object.keys(groupedContacts).length)
+    }
 
     const allowedProjectIds = new Set(ids)
     const filteredLogs = logsData.filter(log => allowedProjectIds.has(log.contacts?.project_id))

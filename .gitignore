@@ -10,9 +10,13 @@ build/
 *.log
 seen_coins.json
 
-# Environment
+# Environment — NEVER commit secrets
 .env
 .env.local
+.env.vercel
+.env.backup
+dashboard/.env
+dashboard/.env.local
 
 # Node / Frontend
 node_modules/
