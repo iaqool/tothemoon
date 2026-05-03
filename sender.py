@@ -148,10 +148,11 @@ https://tothemoon.agency
 
     safe_icebreaker = sanitize_for_html(icebreaker)
     safe_name = sanitize_for_html(name)
+    safe_launchpad_line = sanitize_for_html(launchpad_line)
 
     html = f"""<p>{safe_icebreaker}</p>
 <p>We work with projects ahead of launch to make sure day-one trading does not break on liquidity. TTM gives teams direct access to <strong>2M+</strong> active traders, Top-30 exchange distribution, and clear MM standards from the first trading session.</p>
-<p>Our baseline is spread &lt; 1%, daily volume &gt; $10k, and stable depth around the mid price. If your team still needs a lightweight MM setup, we can also support with Listagram{launchpad_line}.</p>
+<p>Our baseline is spread &lt; 1%, daily volume &gt; $10k, and stable depth around the mid price. If your team still needs a lightweight MM setup, we can also support with Listagram{safe_launchpad_line}.</p>
 <p>If your sale timeline is already taking shape, happy to prepare a preliminary listing path before launch.</p>
 <p>Best,<br>The Tothemoon Team<br><a href="https://tothemoon.agency">tothemoon.agency</a></p>
 """
