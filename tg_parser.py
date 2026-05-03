@@ -153,72 +153,72 @@ async def parse_channels():
     total_new = 0
     total_relevant = 0
 
-    for channel_username in TG_CHANNELS:
-        print(f"\n[PARSE] Channel: @{channel_username}")
-        try:
-            entity = await client.get_entity(channel_username)
-            channel_title = getattr(entity, "title", channel_username)
-        except Exception as e:
-            print(f"[ERROR] Could not resolve @{channel_username}: {e}")
-            continue
-
-        try:
-            messages = await client.get_messages(entity, limit=TG_PARSE_LIMIT)
-        except Exception as e:
-            print(f"[ERROR] Could not fetch messages from @{channel_username}: {e}")
-            continue
-
-        new_signals = []
-        for msg in messages:
-            if not msg.text or len(msg.text.strip()) < 20:
+    try:
+        for channel_username in TG_CHANNELS:
+            print(f"\n[PARSE] Channel: @{channel_username}")
+            try:
+                entity = await client.get_entity(channel_username)
+                channel_title = getattr(entity, "title", channel_username)
+            except Exception as e:
+                print(f"[ERROR] Could not resolve @{channel_username}: {e}")
                 continue
 
-            if (channel_username, msg.id) in existing_keys:
+            try:
+                messages = await client.get_messages(entity, limit=TG_PARSE_LIMIT)
+            except Exception as e:
+                print(f"[ERROR] Could not fetch messages from @{channel_username}: {e}")
                 continue
 
-            classification = await asyncio.to_thread(classify_post, msg.text)
+            new_signals = []
+            for msg in messages:
+                if not msg.text or len(msg.text.strip()) < 20:
+                    continue
 
-            # Skip noise with low relevance
-            if classification["signal_type"] == "noise" and classification["relevance_score"] <= 2:
-                continue
+                if (channel_username, msg.id) in existing_keys:
+                    continue
 
-            msg_date = msg.date
-            if msg_date and msg_date.tzinfo is None:
-                msg_date = msg_date.replace(tzinfo=timezone.utc)
+                classification = await asyncio.to_thread(classify_post, msg.text)
 
-            signal = {
-                "channel_username": channel_username,
-                "channel_title": channel_title,
-                "message_id": msg.id,
-                "message_text": msg.text[:5000],
-                "signal_type": classification["signal_type"],
-                "ai_summary": classification.get("ai_summary"),
-                "project_name": classification.get("project_name"),
-                "ticker": classification.get("ticker"),
-                "chain": classification.get("chain"),
-                "relevance_score": classification["relevance_score"],
-                "message_date": msg_date.isoformat() if msg_date else None,
-            }
-            new_signals.append(signal)
+                # Skip noise with low relevance
+                if classification["signal_type"] == "noise" and classification["relevance_score"] <= 2:
+                    continue
 
-        if new_signals:
-            # Batch insert, skip duplicates
-            for signal in new_signals:
-                try:
-                    supabase.table("tg_signals").upsert(
-                        signal, on_conflict="channel_username,message_id"
-                    ).execute()
-                except Exception as e:
-                    print(f"[WARN] Failed to insert signal: {e}")
+                msg_date = msg.date
+                if msg_date and msg_date.tzinfo is None:
+                    msg_date = msg_date.replace(tzinfo=timezone.utc)
 
-            relevant = [s for s in new_signals if s["signal_type"] != "noise"]
-            total_new += len(new_signals)
-            total_relevant += len(relevant)
-            print(f"  -> {len(new_signals)} new signals ({len(relevant)} relevant)")
-        else:
-            print("  -> No new signals")
+                signal = {
+                    "channel_username": channel_username,
+                    "channel_title": channel_title,
+                    "message_id": msg.id,
+                    "message_text": msg.text[:5000],
+                    "signal_type": classification["signal_type"],
+                    "ai_summary": classification.get("ai_summary"),
+                    "project_name": classification.get("project_name"),
+                    "ticker": classification.get("ticker"),
+                    "chain": classification.get("chain"),
+                    "relevance_score": classification["relevance_score"],
+                    "message_date": msg_date.isoformat() if msg_date else None,
+                }
+                new_signals.append(signal)
 
-    await client.disconnect()
+            if new_signals:
+                for signal in new_signals:
+                    try:
+                        supabase.table("tg_signals").upsert(
+                            signal, on_conflict="channel_username,message_id"
+                        ).execute()
+                    except Exception as e:
+                        print(f"[WARN] Failed to insert signal: {e}")
+
+                relevant = [s for s in new_signals if s["signal_type"] != "noise"]
+                total_new += len(new_signals)
+                total_relevant += len(relevant)
+                print(f"  -> {len(new_signals)} new signals ({len(relevant)} relevant)")
+            else:
+                print("  -> No new signals")
+    finally:
+        await client.disconnect()
 
     print(f"\n[DONE] Total: {total_new} new signals, {total_relevant} relevant")
     return total_new, total_relevant

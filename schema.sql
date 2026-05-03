@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS public.tg_signals (
 );
 
 CREATE INDEX IF NOT EXISTS idx_tg_signals_type ON public.tg_signals(signal_type);
-CREATE INDEX IF NOT EXISTS idx_tg_signals_date ON public.tg_signals(created_at);
+CREATE INDEX IF NOT EXISTS idx_tg_signals_date ON public.tg_signals(message_date);
 CREATE INDEX IF NOT EXISTS idx_tg_signals_relevance ON public.tg_signals(relevance_score);
 
 ALTER TABLE public.tg_signals ENABLE ROW LEVEL SECURITY;
