@@ -1,218 +1,140 @@
 # TTM Lead Gen
 
-Internal lead generation and outreach pipeline for Tothemoon.
+Automated lead generation and outreach pipeline for [Tothemoon](https://tothemoon.agency) — a crypto exchange listing agency.
 
-The system combines:
-- `Supabase` as the source of truth
-- `React + Vite` dashboard for pipeline management
-- `Vercel Functions` for Smart Reply generation with Gemini
-- `Python workers` for scraping, enrichment, briefing, and outreach
-- `GitHub Actions` for scheduled background runs
+## What It Does
+
+Finds crypto projects → enriches contacts (BD, Founders) → sends personalized cold emails → tracks replies → manages follow-ups. Full autopilot with a dashboard for manual control.
+
+**Problem it solves:** Manual BD outreach doesn't scale. This pipeline processes hundreds of projects daily, finds decision-makers, generates AI-personalized icebreakers, and runs multi-stage email campaigns automatically.
 
 ## Architecture
 
-### Dashboard
-- Path: `dashboard/`
-- Stack: `React`, `Vite`, `@supabase/supabase-js`
-- Purpose: manage leads, filter pipeline, log outreach, generate Smart Reply
+| Layer | Tech | Purpose |
+|---|---|---|
+| Dashboard | React + Vite on Vercel | Pipeline management, Smart Reply, CSV export |
+| API | Vercel Serverless Functions | AI reply generation, GitHub Actions trigger, inbound webhook |
+| Workers | Python scripts | Scraping, contact enrichment, outreach |
+| Scheduler | GitHub Actions | Runs workers every 6h (leads) + daily (outreach) |
+| Database | Supabase (Postgres) | Single source of truth for all data |
 
-### Background Workers
-- `scraper.py`: pulls new crypto projects into Supabase
-- `scraper_upcoming.py`: pulls pre-launch token sales from ICO Drops
-- `enricher.py`: finds contacts, prioritizes email and decision makers
-- `briefing.py`: prints a daily pipeline briefing
-- `auto_outreach.py`: sends Stage 1 and follow-up emails
-- `pipeline.py`: runs scraper + enricher + briefing together
-
-### Scheduled Automation
-- `.github/workflows/lead-refresh.yml`
-  - runs every 6 hours
-  - supports manual run with `email_only` or `full` mode
-  - writes a summary to GitHub Actions
-- `.github/workflows/outreach.yml`
-  - runs the automated outreach cycle
-  - writes a summary to GitHub Actions
+### Key Features
+- **Lead discovery:** CoinGecko (live), ICO Drops (upcoming pre-launch tokens)
+- **Contact enrichment:** Email, Twitter/X, LinkedIn, Telegram via Serper.dev search
+- **AI icebreakers:** Gemini generates personalized opening lines per project
+- **Multi-stage outreach:** Cold → Follow-up 1 (4d) → Follow-up 2 (10d) → Offer
+- **Inbound tracking:** Resend webhook captures replies, auto-updates project status
+- **Dashboard refresh:** Triggers GitHub Actions workflow from UI
 
 ## Data Model
 
-Main tables are defined in `schema.sql`:
-- `projects`
-- `contacts`
-- `outreach_logs`
+Defined in `schema.sql` — apply via Supabase SQL Editor.
 
-If you added new fields such as `is_upcoming`, `launch_date`, or `launchpad`, apply `schema.sql` in the Supabase SQL editor so the dashboard and workers can store full upcoming-sale metadata.
-
-Supabase is the shared backend for both the dashboard and background jobs.
+- **projects** — scraped crypto projects (name, ticker, chain, mcap, status, upcoming metadata)
+- **contacts** — enriched contacts per project (email, twitter, telegram, linkedin, role)
+- **outreach_logs** — sent emails and inbound replies with timestamps
 
 ## Local Setup
 
-### 1. Python workers
-
-Create `.env` in the repository root.
-
-Required values:
-
-```env
-SUPABASE_URL=
-SUPABASE_KEY=
-SERPER_API_KEY=
-GEMINI_API_KEY=
-RESEND_API_KEY=
-CG_API_KEY=
-```
-
-Install dependencies:
+### Python Workers
 
 ```bash
+cp .env.example .env   # fill in your keys
 pip install -r requirements.txt
+python pipeline.py             # scrape + enrich + brief
+python pipeline.py --outreach  # + send emails
 ```
 
-Run the full local pipeline:
-
-```bash
-py pipeline.py
-```
-
-Run pipeline with outreach:
-
-```bash
-py pipeline.py --outreach
-```
-
-Useful one-off commands:
-
-```bash
-py scraper.py
-py scraper_upcoming.py
-py -c "import enricher; enricher.run(limit=30)"
-py -c "import enricher; enricher.run(limit=30, email_only=True)"
-py auto_outreach.py
-py briefing.py
-```
-
-### 2. Dashboard
-
-Create `dashboard/.env`:
-
-```env
-VITE_SUPABASE_URL=
-VITE_SUPABASE_KEY=
-```
-
-Install frontend dependencies:
+### Dashboard
 
 ```bash
 cd dashboard
-npm install
+cp .env.example .env   # VITE_SUPABASE_URL, VITE_SUPABASE_KEY
+npm install && npm run dev
 ```
 
-Run locally:
+## Environment Variables
 
-```bash
-npm run dev
-```
+### Root `.env` (Python workers + GitHub Actions)
 
-Build locally:
+| Variable | Required | Purpose |
+|---|---|---|
+| `SUPABASE_URL` | Yes | Supabase project URL |
+| `SUPABASE_KEY` | Yes | Supabase anon/service key |
+| `SERPER_API_KEY` | Yes | Serper.dev Google Search (contact enrichment) |
+| `GEMINI_API_KEY` | Yes | Google Gemini (AI icebreakers) |
+| `RESEND_API_KEY` | Yes | Resend (email sending) |
+| `CG_API_KEY` | No | CoinGecko API (removes rate limit) |
 
-```bash
-npm run build
-```
+### `dashboard/.env` (Frontend)
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `VITE_SUPABASE_URL` | Yes | Supabase project URL (client-safe) |
+| `VITE_SUPABASE_KEY` | Yes | Supabase anon key (client-safe) |
+| `VITE_API_SECRET` | No | Auth token for API endpoints (must match Vercel `API_SECRET`) |
+
+### Vercel Environment Variables
+
+| Variable | Required | Purpose |
+|---|---|---|
+| `VITE_SUPABASE_URL` | Yes | Supabase URL |
+| `VITE_SUPABASE_KEY` | Yes | Supabase anon key |
+| `GEMINI_API_KEY` | Yes | For `/api/generate-reply` |
+| `GITHUB_TOKEN` | Yes | PAT with `repo` + `workflow` scopes |
+| `GITHUB_REPO` | Yes | e.g. `owner/repo` |
+| `RESEND_WEBHOOK_SECRET` | Yes | Validates `/api/inbound` webhook |
+| `API_SECRET` | Yes | Protects all API endpoints (endpoints return 500 if unset) |
+
+### GitHub Actions Secrets
+
+`SUPABASE_URL`, `SUPABASE_KEY`, `SERPER_API_KEY`, `CG_API_KEY`, `GEMINI_API_KEY`, `RESEND_API_KEY`
+
+## Vercel API Endpoints
+
+| Endpoint | Method | Auth | Purpose |
+|---|---|---|---|
+| `/api/generate-reply` | POST | `API_SECRET` | Generates AI icebreaker for a project |
+| `/api/trigger-refresh` | POST | `API_SECRET` | Triggers lead-refresh GitHub Actions workflow |
+| `/api/check-refresh-status` | GET | `API_SECRET` | Polls workflow run status |
+| `/api/inbound` | POST | `RESEND_WEBHOOK_SECRET` | Receives email reply webhooks from Resend |
 
 ## Enricher Modes
 
-`enricher.py` supports two practical modes:
-
-### Full mode
-
 ```bash
-py -c "import enricher; enricher.run(limit=30, email_only=False)"
+# Full mode — all platforms
+python -c "import enricher; enricher.run(limit=30, email_only=False)"
+
+# Email-only — optimized for outreach (mcap > $1M, no email yet)
+python -c "import enricher; enricher.run(limit=30, email_only=True)"
 ```
 
-Finds:
-- `Email`
-- `LinkedIn`
-- `X / Twitter`
-- `Telegram`
+## GitHub Actions Workflows
 
-### Email-only mode
+### Lead Refresh (`.github/workflows/lead-refresh.yml`)
+- Schedule: every 6 hours
+- Manual dispatch: `mode` (full/email_only), `enrich_limit` (30/50/100)
 
-```bash
-py -c "import enricher; enricher.run(limit=30, email_only=True)"
-```
+### Outreach (`.github/workflows/outreach.yml`)
+- Manual dispatch (schedule disabled by default)
+- Runs `auto_outreach.py` → Stage 1 + follow-ups
 
-Optimized for auto outreach. Prioritizes:
-- projects with `mcap > $1M`
-- projects without `Email`
-- docs / media-kit / partnerships / press pages
+## Operational Model
 
-## Vercel Deployment
+1. **Lead Refresh** runs every 6h via GitHub Actions
+2. **Dashboard** on Vercel shows live pipeline state
+3. **Email autopilot** via `auto_outreach.py` (Stage 1 → Follow-ups)
+4. **Manual outreach** (X / Telegram) through dashboard
+5. **Smart Reply** generated per project via Gemini
+6. **Inbound replies** tracked automatically via Resend webhook
 
-Deploy `dashboard/` to Vercel.
+## Security Notes
 
-Set these environment variables in Vercel:
-
-```env
-VITE_SUPABASE_URL=
-VITE_SUPABASE_KEY=
-GEMINI_API_KEY=
-```
-
-Notes:
-- `GEMINI_API_KEY` is used by `dashboard/api/generate-reply.js`
-- client-side Supabase keys must be the frontend-safe keys you intend to expose
-
-## GitHub Actions Setup
-
-Repository secrets required for background workflows:
-
-```env
-SUPABASE_URL
-SUPABASE_KEY
-SERPER_API_KEY
-CG_API_KEY
-GEMINI_API_KEY
-RESEND_API_KEY
-```
-
-### Lead Refresh
-
-Workflow: `.github/workflows/lead-refresh.yml`
-
-Manual options:
-- `mode = email_only`
-- `mode = full`
-- `enrich_limit = 30/50/100`
-
-Output:
-- new emails found
-- new founders found
-- new BD / Listing contacts found
-- priority leads summary
-
-### Outreach Cycle
-
-Workflow: `.github/workflows/outreach.yml`
-
-Output:
-- Stage 1 sent
-- Follow-up 1 sent
-- Follow-up 2 sent
-- recent activity summary
-
-## Current Operational Model
-
-Recommended usage:
-
-1. `Lead Refresh` runs every 6 hours in GitHub Actions
-2. Dashboard on Vercel shows current pipeline state
-3. Manual outreach is done through dashboard for `X / TG`
-4. Email autopilot uses `auto_outreach.py`
-5. Upcoming token sales are imported before CoinGecko listings hit the market
-6. Smart Reply is generated via Vercel serverless function
-
-## Notes
-
-- Vercel is used for UI and fast AI endpoints, not long-running Python jobs
-- GitHub Actions is used for scheduled scraping, enrichment, and outreach
-- Supabase remains the single shared backend
-- Do not print secrets in workflow logs
+- Never commit `.env` files — all are in `.gitignore`
+- API endpoints require `API_SECRET` Bearer token
+- Inbound webhook uses timing-safe secret comparison
+- Enricher has SSRF protection (blocks private IPs, metadata endpoints)
+- Email content is HTML-sanitized before sending
+- CSV export is protected against formula injection
+- GitHub Actions pinned to commit SHAs
+- Dependencies have upper-bound version pins

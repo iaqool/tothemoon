@@ -16,6 +16,8 @@ import re
 import sys
 import time
 import json
+import socket
+import ipaddress
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
@@ -109,6 +111,41 @@ DOC_LINK_HINTS = (
     "team",
     "about",
 )
+
+
+# ─── SSRF Protection ──────────────────────────────────────────────────────────
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+]
+
+
+def is_safe_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            return False
+        hostname = parsed.hostname
+        if not hostname:
+            return False
+        if hostname in ("metadata.google.internal", "metadata"):
+            return False
+        addrs = socket.getaddrinfo(hostname, None)
+        for _, _, _, _, sockaddr in addrs:
+            ip = ipaddress.ip_address(sockaddr[0])
+            for network in _BLOCKED_NETWORKS:
+                if ip in network:
+                    return False
+        return True
+    except Exception:
+        return False
 
 
 # ─── Search Engine Helper ─────────────────────────────────────────────────────
@@ -239,10 +276,28 @@ def get_project_website(project: dict) -> str:
         return website
 
 
+def _safe_redirect_get(url: str, headers: dict, max_hops: int = 5) -> requests.Response | None:
+    for _ in range(max_hops):
+        r = requests.get(url, headers=headers, timeout=8, allow_redirects=False)
+        if r.is_redirect or r.status_code in (301, 302, 303, 307, 308):
+            location = r.headers.get("Location", "")
+            if not location:
+                return None
+            next_url = urljoin(url, location)
+            if not is_safe_url(next_url):
+                return None
+            url = next_url
+            continue
+        return r
+    return None
+
+
 def fetch_page(url: str, headers: dict) -> tuple[str, BeautifulSoup | None]:
+    if not is_safe_url(url):
+        return "", None
     try:
-        r = requests.get(url, headers=headers, timeout=8)
-        if r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
+        r = _safe_redirect_get(url, headers)
+        if r is None or r.status_code != 200 or "text/html" not in r.headers.get("Content-Type", ""):
             return "", None
         return r.text, BeautifulSoup(r.text, "html.parser")
     except Exception:
