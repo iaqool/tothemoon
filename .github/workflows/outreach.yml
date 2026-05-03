@@ -19,6 +19,10 @@ jobs:
       SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
       RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      OUTREACH_DAILY_LIMIT: ${{ vars.OUTREACH_DAILY_LIMIT || '50' }}
+      OUTREACH_FOLLOWUP_LIMIT: ${{ vars.OUTREACH_FOLLOWUP_LIMIT || '30' }}
+      OUTREACH_START_DATE: ${{ vars.OUTREACH_START_DATE || '' }}
+      EMAIL_SEND_RETRIES: '3'
 
     steps:
       - name: Checkout repository

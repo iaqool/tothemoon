@@ -1,7 +1,10 @@
 import os
 import re
 import html as html_module
+import dns.resolver
+import time
 import resend
+from functools import lru_cache
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -12,8 +15,11 @@ if RESEND_API_KEY:
     resend.api_key = RESEND_API_KEY
 
 SENDER_EMAIL = (
-    "hello@tothemoon.agency"  # Замените на ваш верифицированный домен в Resend
+    "hello@tothemoon.agency"  # Replace with your verified domain in Resend
 )
+
+MAX_RETRIES = max(int(os.getenv("EMAIL_SEND_RETRIES", "3")), 1)
+RETRY_DELAY = 2  # seconds between retries
 
 
 def sanitize_for_html(text: str) -> str:
@@ -27,16 +33,38 @@ def sanitize_for_text(text: str) -> str:
 
 
 def validate_email(email: str) -> bool:
+    """Basic email format validation."""
     if not email or not isinstance(email, str):
         return False
     return bool(re.match(r"^[^\s@]+@[^\s@]+\.[^\s@]+$", email.strip()))
+
+
+@lru_cache(maxsize=1024)
+def _check_mx_domain(domain: str) -> bool:
+    """Verify that a domain has MX records (cached by domain)."""
+    try:
+        records = dns.resolver.resolve(domain, "MX")
+        return len(records) > 0
+    except (dns.resolver.NoAnswer, dns.resolver.NXDOMAIN, dns.resolver.NoNameservers):
+        return False
+    except Exception:
+        # DNS timeout or transient error — allow sending to avoid false negatives
+        return True
+
+
+def check_mx(email: str) -> bool:
+    """Verify that the email domain has MX records."""
+    if not email or "@" not in email:
+        return False
+    domain = email.strip().split("@")[1]
+    return _check_mx_domain(domain)
 
 
 def send_email(
     to_email: str, subject: str, text_content: str, html_content: str = None
 ) -> dict:
     """
-    Отправляет email через Resend API.
+    Send email via Resend API with retry logic.
     """
     if not validate_email(to_email):
         print(f"[ERROR] Invalid email address: {to_email}")
@@ -47,21 +75,28 @@ def send_email(
         print(f"Content:\n{text_content}\n" + "-" * 40)
         return {"id": "mock_id_" + os.urandom(4).hex()}
 
-    try:
-        params = {
-            "from": f"Tothemoon <{SENDER_EMAIL}>",
-            "to": [to_email],
-            "subject": subject,
-            "text": text_content,
-        }
-        if html_content:
-            params["html"] = html_content
+    params = {
+        "from": f"Tothemoon <{SENDER_EMAIL}>",
+        "to": [to_email],
+        "subject": subject,
+        "text": text_content,
+    }
+    if html_content:
+        params["html"] = html_content
 
-        response = resend.Emails.send(params)
-        return response
-    except Exception as e:
-        print(f"[ERROR] Failed to send email to {to_email}: {e}")
-        return None
+    last_error = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            response = resend.Emails.send(params)
+            return response
+        except Exception as e:
+            last_error = e
+            if attempt < MAX_RETRIES:
+                print(f"[RETRY {attempt}/{MAX_RETRIES}] Send to {to_email} failed: {e}")
+                time.sleep(RETRY_DELAY * attempt)
+            else:
+                print(f"[ERROR] Failed to send email to {to_email} after {MAX_RETRIES} attempts: {last_error}")
+    return None
 
 
 def build_stage1_email(icebreaker: str, name: str, ticker: str) -> dict:
@@ -112,11 +147,11 @@ https://tothemoon.agency
 """
 
     safe_icebreaker = sanitize_for_html(icebreaker)
-    safe_launchpad_line = sanitize_for_html(launchpad_line)
+    safe_name = sanitize_for_html(name)
 
     html = f"""<p>{safe_icebreaker}</p>
 <p>We work with projects ahead of launch to make sure day-one trading does not break on liquidity. TTM gives teams direct access to <strong>2M+</strong> active traders, Top-30 exchange distribution, and clear MM standards from the first trading session.</p>
-<p>Our baseline is spread &lt; 1%, daily volume &gt; $10k, and stable depth around the mid price. If your team still needs a lightweight MM setup, we can also support with Listagram{safe_launchpad_line}.</p>
+<p>Our baseline is spread &lt; 1%, daily volume &gt; $10k, and stable depth around the mid price. If your team still needs a lightweight MM setup, we can also support with Listagram{launchpad_line}.</p>
 <p>If your sale timeline is already taking shape, happy to prepare a preliminary listing path before launch.</p>
 <p>Best,<br>The Tothemoon Team<br><a href="https://tothemoon.agency">tothemoon.agency</a></p>
 """
@@ -149,7 +184,7 @@ def build_followup2_email(name: str, ticker: str, contact_name: str = "") -> dic
 
 Last note from my side — if the timing isn't right for {name} right now, totally understood.
 
-Feel free to reach out whenever you're ready to explore exchange listing opportunities. Wishing you all the best with your roadmap! 🌙
+Feel free to reach out whenever you're ready to explore exchange listing opportunities. Wishing you all the best with your roadmap! \U0001f319
 
 Best,
 The Tothemoon Team

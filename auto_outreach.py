@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 from dotenv import load_dotenv
 
@@ -11,6 +11,32 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+# Configurable limits via env vars
+DAILY_LIMIT = int(os.getenv("OUTREACH_DAILY_LIMIT", "50"))
+FOLLOWUP_LIMIT = int(os.getenv("OUTREACH_FOLLOWUP_LIMIT", "30"))
+FOLLOWUP_1_DAYS = int(os.getenv("FOLLOWUP_1_DAYS", "4"))
+FOLLOWUP_2_DAYS = int(os.getenv("FOLLOWUP_2_DAYS", "10"))
+
+# Warm-up: ramp up sending volume over first 14 days
+# Set OUTREACH_START_DATE to the date you first enabled outreach (YYYY-MM-DD)
+# During warm-up, daily limit = min(DAILY_LIMIT, 10 + days_since_start * 5)
+WARMUP_START = os.getenv("OUTREACH_START_DATE", "")
+
+
+def get_warmup_limit() -> int:
+    """Calculate effective daily limit based on warm-up schedule."""
+    if not WARMUP_START:
+        return DAILY_LIMIT
+    try:
+        start = datetime.strptime(WARMUP_START, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+        days_active = (datetime.now(timezone.utc) - start).days
+        if days_active < 0:
+            return 10
+        warmup_cap = 10 + (days_active * 5)
+        return min(DAILY_LIMIT, warmup_cap)
+    except ValueError:
+        return DAILY_LIMIT
 
 
 def has_project_column(column: str) -> bool:
@@ -26,25 +52,55 @@ PROJECT_HAS_LAUNCH_DATE = has_project_column("launch_date")
 PROJECT_HAS_LAUNCHPAD = has_project_column("launchpad")
 
 
+def get_already_emailed() -> set[str]:
+    """Get set of email addresses we've already sent Stage 1 to."""
+    try:
+        res = (
+            supabase.table("outreach_logs")
+            .select("contacts!inner(value, platform)")
+            .eq("stage", "Stage 1 (Cold)")
+            .limit(5000)
+            .execute()
+        )
+        emails = set()
+        for log in res.data or []:
+            contact = log.get("contacts", {})
+            if contact.get("platform") == "Email" and contact.get("value"):
+                emails.add(contact["value"].lower())
+        return emails
+    except Exception as e:
+        print(f"[WARN] Could not load sent emails for dedup: {e}")
+        return set()
+
+
 def run_outreach_cycle():
     """
-    Основная функция: проверяет проекты и отправляет первую рассылку или follow-ups.
+    Main function: sends Stage 1 cold emails and follow-ups.
     """
     print("\n" + "=" * 50)
-    print("🚀 TTM Auto-Pilot: Outreach Cycle Started")
+    print("TTM Auto-Pilot: Outreach Cycle Started")
     print("=" * 50)
 
-    handle_stage_1()
+    effective_limit = get_warmup_limit()
+    print(f"Daily limit: {effective_limit} (configured: {DAILY_LIMIT})")
+    if WARMUP_START:
+        try:
+            start = datetime.strptime(WARMUP_START, "%Y-%m-%d")
+            days = (datetime.utcnow() - start).days
+            print(f"Warm-up day {days} (start: {WARMUP_START})")
+        except ValueError:
+            pass
+
+    handle_stage_1(effective_limit)
     handle_followups()
 
-    print("\n✅ Outreach Cycle Completed\n")
+    print("\nOutreach Cycle Completed\n")
 
 
-def handle_stage_1():
-    print("\n--- Processing Stage 1 (Cold) ---")
-    # Ищем проекты со статусом not_contacted
+def handle_stage_1(daily_limit: int):
+    print(f"\n--- Processing Stage 1 (Cold) [limit: {daily_limit}] ---")
+
     try:
-        # 1. Приоритетная очередь
         project_fields = ["id", "name", "ticker", "chain", "mcap", "source"]
         if PROJECT_HAS_IS_UPCOMING:
             project_fields.append("is_upcoming")
@@ -70,19 +126,18 @@ def handle_stage_1():
         print("No new projects for Stage 1.")
         return
 
-    # дневной или run-лимит
-    DAILY_LIMIT = 3
+    already_emailed = get_already_emailed()
+    print(f"Dedup: {len(already_emailed)} emails already contacted")
+
     sent_count = 0
-    contacted_domains = set()  # для дедупликации доменов
+    skipped_dedup = 0
+    contacted_domains = set()
 
     for p in projects:
-        if sent_count >= DAILY_LIMIT:
-            print(
-                f"Reached daily limit of {DAILY_LIMIT} cold emails. Stopping Stage 1."
-            )
+        if sent_count >= daily_limit:
+            print(f"Reached daily limit of {daily_limit} cold emails. Stopping Stage 1.")
             break
 
-        # Ищем Email контакты для проекта
         try:
             c_res = (
                 supabase.table("contacts")
@@ -99,15 +154,31 @@ def handle_stage_1():
         if not contacts:
             continue
 
-        # Выбираем лучший контакт
+        # Pick best contact (prefer Founder/BD)
         target_contact = contacts[0]
         for c in contacts:
             if c.get("role") and c["role"] in ["Founder", "BD / Partnerships"]:
                 target_contact = c
                 break
 
-        # Проверка домена для предотвращения отправки разным токенам одной команды
         email_val = target_contact["value"].lower()
+
+        # Dedup: skip if we've already emailed this address
+        if email_val in already_emailed:
+            skipped_dedup += 1
+            continue
+
+        # Validate email before sending
+        if not sender.validate_email(email_val):
+            print(f"Skipping {p['name']} - invalid email: {email_val}")
+            continue
+
+        # MX validation
+        if not sender.check_mx(email_val):
+            print(f"Skipping {p['name']} - no MX records for {email_val}")
+            continue
+
+        # Domain dedup within this run
         if "@" in email_val:
             domain = email_val.split("@")[1]
             if domain in contacted_domains and domain not in [
@@ -117,9 +188,7 @@ def handle_stage_1():
                 "hotmail.com",
                 "proton.me",
             ]:
-                print(
-                    f"Skipping {p['name']} - already contacted domain {domain} in this run."
-                )
+                print(f"Skipping {p['name']} - already contacted domain {domain} in this run.")
                 continue
             contacted_domains.add(domain)
 
@@ -127,7 +196,6 @@ def handle_stage_1():
 
         is_upcoming = bool(p.get("is_upcoming") or p.get("source") == "ICO Drops")
 
-        # 1. AI Personalization
         icebreaker = ai_generator.generate_icebreaker(
             name=p["name"],
             chain=p.get("chain", ""),
@@ -137,7 +205,6 @@ def handle_stage_1():
             launchpad=p.get("launchpad", ""),
         )
 
-        # 2. Build template & Send
         if is_upcoming:
             email_content = sender.build_stage1_upcoming_email(
                 icebreaker, p["name"], p.get("ticker", ""), p.get("launchpad", "")
@@ -154,7 +221,6 @@ def handle_stage_1():
         )
 
         if send_res:
-            # 3. Log an entry
             supabase.table("outreach_logs").insert(
                 {
                     "contact_id": target_contact["id"],
@@ -163,28 +229,28 @@ def handle_stage_1():
                 }
             ).execute()
 
-            # 4. Update status
             supabase.table("projects").update({"status": "contacted"}).eq(
                 "id", p["id"]
             ).execute()
             print(f"  -> Stage 1 sent to {p['name']}!")
             sent_count += 1
+            already_emailed.add(email_val)
 
-    print(f"Stage 1 total sent: {sent_count}")
+    print(f"Stage 1 total sent: {sent_count} (skipped dedup: {skipped_dedup})")
 
 
 def handle_followups():
     print("\n--- Processing Follow-ups ---")
 
-    # Чтобы найти проекты для Follow-up, нам нужны контакты, по которым мы уже отправляли письма
-    # Более надежный путь: найти последние outreach_logs
     try:
-        # Для простоты: берем последние логи (сортировка по sent_at)
+        thirty_days_ago = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
         logs_res = (
             supabase.table("outreach_logs")
             .select(
-                "*, contacts!inner(project_id, platform, value, contact_name, projects!inner(id, name, ticker, status))"
+                "*, contacts!inner(id, project_id, platform, value, contact_name, projects!inner(id, name, ticker, status))"
             )
+            .gte("sent_at", thirty_days_ago)
+            .limit(500)
             .execute()
         )
 
@@ -193,18 +259,15 @@ def handle_followups():
         print(f"[ERROR] Failed to fetch outreach logs: {e}")
         return
 
-    # Группируем последний лог для каждого проекта (используя contacts.project_id)
     latest_logs_by_project = {}
     for log in all_logs:
         if not log.get("contacts"):
             continue
         pid = log["contacts"]["project_id"]
-        # Если проект уже ответил или мы больше не отправляем - пропускаем
         project_status = log["contacts"]["projects"]["status"]
         if project_status in ["replied", "no_response"]:
             continue
 
-        # Проверяем только Email контакты (мы автоматизируем только почту сейчас)
         if log["contacts"]["platform"] != "Email":
             continue
 
@@ -218,13 +281,14 @@ def handle_followups():
             if log_time > existing_time:
                 latest_logs_by_project[pid] = log
 
-    now = datetime.utcnow().replace(tzinfo=None)  # условно UTC-naive для сравнения
+    now = datetime.utcnow().replace(tzinfo=None)
     followup_count = 0
 
     for pid, log in latest_logs_by_project.items():
-        # Сравниваем даты. Supabase использует UTC
-        # Так как datetime.fromisoformat оставляет tzinfo (если оно там было, например +00:00)
-        # Приведем к naive для простоты сравнения
+        if followup_count >= FOLLOWUP_LIMIT:
+            print(f"Reached follow-up limit of {FOLLOWUP_LIMIT}. Stopping.")
+            break
+
         log_time = datetime.fromisoformat(log["sent_at"].replace("Z", "")[:19])
         days_ago = (now - log_time).days
 
@@ -235,7 +299,7 @@ def handle_followups():
         stage_to_send = None
         email_content = None
 
-        if stage == "Stage 1 (Cold)" and days_ago >= 4:
+        if stage == "Stage 1 (Cold)" and days_ago >= FOLLOWUP_1_DAYS:
             stage_to_send = "Follow-up 1"
             email_content = sender.build_followup1_email(
                 project["name"],
@@ -243,14 +307,14 @@ def handle_followups():
                 target_contact.get("contact_name", ""),
             )
             new_project_status = "follow_up"
-        elif stage == "Follow-up 1" and days_ago >= 10:
+        elif stage == "Follow-up 1" and days_ago >= FOLLOWUP_2_DAYS:
             stage_to_send = "Follow-up 2"
             email_content = sender.build_followup2_email(
                 project["name"],
                 project.get("ticker", ""),
                 target_contact.get("contact_name", ""),
             )
-            new_project_status = "no_response"  # После Follow-up 2 закрываем воронку
+            new_project_status = "no_response"
 
         if stage_to_send and email_content:
             print(f"Targeting {project['name']} for {stage_to_send}")
