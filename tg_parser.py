@@ -179,10 +179,6 @@ async def parse_channels():
 
                 classification = await asyncio.to_thread(classify_post, msg.text)
 
-                # Skip noise with low relevance
-                if classification["signal_type"] == "noise" and classification["relevance_score"] <= 2:
-                    continue
-
                 msg_date = msg.date
                 if msg_date and msg_date.tzinfo is None:
                     msg_date = msg_date.replace(tzinfo=timezone.utc)
