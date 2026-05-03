@@ -137,7 +137,7 @@ async def parse_channels():
     # Get existing message IDs to avoid reprocessing (scoped to configured channels)
     existing_keys = set()
     for ch in TG_CHANNELS:
-        res = supabase.table("tg_signals").select("channel_username, message_id").eq("channel_username", ch).execute()
+        res = supabase.table("tg_signals").select("channel_username, message_id").eq("channel_username", ch).order("message_id", desc=True).limit(5000).execute()
         for row in (res.data or []):
             existing_keys.add((row["channel_username"], row["message_id"]))
     print(f"[INFO] {len(existing_keys)} existing signals in database")
