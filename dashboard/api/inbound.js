@@ -92,7 +92,7 @@ export default async function handler(req, res) {
                 .insert({
                     contact_id: contact.id,
                     stage: 'Inbound Reply',
-                    response: (emailData.text || '').slice(0, 5000),
+                    response: (emailData.text || emailData.html || 'No content parsed').slice(0, 5000),
                     raw_payload: null
                 });
         }
