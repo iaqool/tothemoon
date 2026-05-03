@@ -526,7 +526,7 @@ function TGSignalsPage() {
         source: 'Telegram',
         status: 'not_contacted',
         is_priority: ['Solana', 'TON', 'Base'].includes(signal.chain),
-      }, { onConflict: 'name,chain' })
+      }, { onConflict: 'name,chain', ignoreDuplicates: true })
 
       if (!error) {
         await supabase.from('tg_signals').update({ is_added_to_leads: true }).eq('id', signal.id)
@@ -688,7 +688,7 @@ function TGSignalsPage() {
         Показано {filtered.length} из {signals.length} сигналов
       </div>
 
-      {toast && <div className="toast">✓ {toast}</div>}
+      {toast && <div className="toast">{toast}</div>}
     </div>
   )
 }
