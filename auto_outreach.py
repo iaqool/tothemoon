@@ -250,7 +250,8 @@ def handle_followups():
                 "*, contacts!inner(id, project_id, platform, value, contact_name, projects!inner(id, name, ticker, status))"
             )
             .gte("sent_at", thirty_days_ago)
-            .limit(500)
+            .order("sent_at", desc=True)
+            .limit(2500)
             .execute()
         )
 
