@@ -650,7 +650,7 @@ function TGSignalsPage() {
               <div className="signal-project">
                 {signal.project_name}
                 {signal.ticker && <span className="signal-ticker">${signal.ticker}</span>}
-                {signal.chain && <span className={`chain-badge chain-${signal.chain}`}>{signal.chain}</span>}
+                {signal.chain && <span className={`chain-badge ${chainClass(signal.chain)}`}>{signal.chain}</span>}
               </div>
             )}
 

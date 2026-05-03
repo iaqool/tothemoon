@@ -134,12 +134,12 @@ async def parse_channels():
 
     supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    # Get existing message IDs to avoid reprocessing
-    existing_res = supabase.table("tg_signals").select("channel_username, message_id").execute()
-    existing_keys = {
-        (row["channel_username"], row["message_id"])
-        for row in (existing_res.data or [])
-    }
+    # Get existing message IDs to avoid reprocessing (scoped to configured channels)
+    existing_keys = set()
+    for ch in TG_CHANNELS:
+        res = supabase.table("tg_signals").select("channel_username, message_id").eq("channel_username", ch).execute()
+        for row in (res.data or []):
+            existing_keys.add((row["channel_username"], row["message_id"]))
     print(f"[INFO] {len(existing_keys)} existing signals in database")
 
     client = TelegramClient(StringSession(TELEGRAM_SESSION), TELEGRAM_API_ID, TELEGRAM_API_HASH)
@@ -176,7 +176,7 @@ async def parse_channels():
             if (channel_username, msg.id) in existing_keys:
                 continue
 
-            classification = classify_post(msg.text)
+            classification = await asyncio.to_thread(classify_post, msg.text)
 
             # Skip noise with low relevance
             if classification["signal_type"] == "noise" and classification["relevance_score"] <= 2:
