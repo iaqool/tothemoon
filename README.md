@@ -20,6 +20,7 @@ Finds crypto projects → enriches contacts (BD, Founders) → sends personalize
 
 ### Key Features
 - **Lead discovery:** CoinGecko (live), ICO Drops (upcoming pre-launch tokens)
+- **TG Signal Parser:** Monitors crypto Telegram channels, AI-classifies posts (TGE/listing, activity, long-term), surfaces actionable signals
 - **Contact enrichment:** Email, Twitter/X, LinkedIn, Telegram via Serper.dev search
 - **AI icebreakers:** Gemini generates personalized opening lines per project
 - **Multi-stage outreach:** Cold → Follow-up 1 (4d) → Follow-up 2 (10d) → Offer
@@ -33,6 +34,7 @@ Defined in `schema.sql` — apply via Supabase SQL Editor.
 - **projects** — scraped crypto projects (name, ticker, chain, mcap, status, upcoming metadata)
 - **contacts** — enriched contacts per project (email, twitter, telegram, linkedin, role)
 - **outreach_logs** — sent emails and inbound replies with timestamps
+- **tg_signals** — classified signals from Telegram channels (TGE, activity, long-term)
 
 ## Local Setup
 
@@ -62,9 +64,12 @@ npm install && npm run dev
 | `SUPABASE_URL` | Yes | Supabase project URL |
 | `SUPABASE_KEY` | Yes | Supabase anon/service key |
 | `SERPER_API_KEY` | Yes | Serper.dev Google Search (contact enrichment) |
-| `GEMINI_API_KEY` | Yes | Google Gemini (AI icebreakers) |
+| `GEMINI_API_KEY` | Yes | Google Gemini (AI icebreakers + TG signal classification) |
 | `RESEND_API_KEY` | Yes | Resend (email sending) |
 | `CG_API_KEY` | No | CoinGecko API (removes rate limit) |
+| `TELEGRAM_API_ID` | For TG parser | From https://my.telegram.org |
+| `TELEGRAM_API_HASH` | For TG parser | From https://my.telegram.org |
+| `TELEGRAM_SESSION` | For TG parser | Generated via `python tg_auth.py` |
 
 ### `dashboard/.env` (Frontend)
 
@@ -88,7 +93,13 @@ npm install && npm run dev
 
 ### GitHub Actions Secrets
 
-`SUPABASE_URL`, `SUPABASE_KEY`, `SERPER_API_KEY`, `CG_API_KEY`, `GEMINI_API_KEY`, `RESEND_API_KEY`
+`SUPABASE_URL`, `SUPABASE_KEY`, `SERPER_API_KEY`, `CG_API_KEY`, `GEMINI_API_KEY`, `RESEND_API_KEY`, `TELEGRAM_API_ID`, `TELEGRAM_API_HASH`, `TELEGRAM_SESSION`
+
+### GitHub Actions Variables
+
+| Variable | Purpose |
+|---|---|
+| `TG_CHANNELS` | Comma-separated channel usernames for TG parser (e.g. `crypto_news,ton_updates`) |
 
 ## Vercel API Endpoints
 
@@ -119,14 +130,22 @@ python -c "import enricher; enricher.run(limit=30, email_only=True)"
 - Manual dispatch (schedule disabled by default)
 - Runs `auto_outreach.py` → Stage 1 + follow-ups
 
+### TG Signal Parser (`.github/workflows/tg-parse.yml`)
+- Schedule: every 2 hours
+- Parses configured Telegram channels via Telethon
+- AI-classifies posts with Gemini (TGE/listing, activity, long-term, noise)
+- Stores signals in `tg_signals` table
+- Setup: `python tg_auth.py` (one-time), add secrets + `TG_CHANNELS` variable
+
 ## Operational Model
 
 1. **Lead Refresh** runs every 6h via GitHub Actions
-2. **Dashboard** on Vercel shows live pipeline state
-3. **Email autopilot** via `auto_outreach.py` (Stage 1 → Follow-ups)
-4. **Manual outreach** (X / Telegram) through dashboard
-5. **Smart Reply** generated per project via Gemini
-6. **Inbound replies** tracked automatically via Resend webhook
+2. **TG Signal Parser** runs every 2h — monitors crypto channels, AI-classifies signals
+3. **Dashboard** on Vercel shows live pipeline state + TG Signals tab
+4. **Email autopilot** via `auto_outreach.py` (Stage 1 → Follow-ups)
+5. **Manual outreach** (X / Telegram) through dashboard
+6. **Smart Reply** generated per project via Gemini
+7. **Inbound replies** tracked automatically via Resend webhook
 
 ## Security Notes
 

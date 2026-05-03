@@ -90,3 +90,31 @@ CREATE POLICY "anon_insert_contacts" ON public.contacts FOR INSERT WITH CHECK (t
 
 CREATE POLICY "anon_read_outreach_logs" ON public.outreach_logs FOR SELECT USING (true);
 CREATE POLICY "anon_insert_outreach_logs" ON public.outreach_logs FOR INSERT WITH CHECK (true);
+
+-- 4. Таблица сигналов из Telegram каналов
+CREATE TABLE IF NOT EXISTS public.tg_signals (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    channel_username TEXT NOT NULL,
+    channel_title TEXT NOT NULL,
+    message_id BIGINT NOT NULL,
+    message_text TEXT DEFAULT '',
+    signal_type TEXT NOT NULL DEFAULT 'noise', -- tge_listing, activity, long_term, noise
+    ai_summary TEXT,
+    project_name TEXT,
+    ticker TEXT,
+    chain TEXT,
+    relevance_score INTEGER DEFAULT 0, -- 1-10
+    message_date TIMESTAMP WITH TIME ZONE,
+    is_added_to_leads BOOLEAN DEFAULT false,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
+    CONSTRAINT unique_tg_signal UNIQUE (channel_username, message_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tg_signals_type ON public.tg_signals(signal_type);
+CREATE INDEX IF NOT EXISTS idx_tg_signals_date ON public.tg_signals(created_at);
+CREATE INDEX IF NOT EXISTS idx_tg_signals_relevance ON public.tg_signals(relevance_score);
+
+ALTER TABLE public.tg_signals ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "anon_read_tg_signals" ON public.tg_signals FOR SELECT USING (true);
+CREATE POLICY "anon_insert_tg_signals" ON public.tg_signals FOR INSERT WITH CHECK (true);
+CREATE POLICY "anon_update_tg_signals" ON public.tg_signals FOR UPDATE USING (true) WITH CHECK (true);

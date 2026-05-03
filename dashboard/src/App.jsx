@@ -468,6 +468,231 @@ function OutreachFeed({ items, onOpenProject }) {
   )
 }
 
+/* ─── TG Signals Page ──────────────────────────────────────────────────── */
+function TGSignalsPage() {
+  const [signals, setSignals] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [filterType, setFilterType] = useState('all')
+  const [filterChannel, setFilterChannel] = useState('all')
+  const [adding, setAdding] = useState(null)
+  const [toast, setToast] = useState(null)
+
+  const showToast = (msg) => {
+    setToast(msg)
+    setTimeout(() => setToast(null), 3000)
+  }
+
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true)
+      const { data } = await supabase
+        .from('tg_signals')
+        .select('*')
+        .order('message_date', { ascending: false })
+        .limit(500)
+      setSignals(data || [])
+      setLoading(false)
+    }
+    load()
+  }, [])
+
+  const channels = [...new Set(signals.map(s => s.channel_username))].sort()
+
+  const filtered = signals.filter(s => {
+    if (filterType !== 'all' && s.signal_type !== filterType) return false
+    if (filterChannel !== 'all' && s.channel_username !== filterChannel) return false
+    if (filterType === 'all' && s.signal_type === 'noise') return false
+    return true
+  })
+
+  const typeCounts = {
+    tge_listing: signals.filter(s => s.signal_type === 'tge_listing').length,
+    activity: signals.filter(s => s.signal_type === 'activity').length,
+    long_term: signals.filter(s => s.signal_type === 'long_term').length,
+    noise: signals.filter(s => s.signal_type === 'noise').length,
+  }
+
+  const handleAddToLeads = async (signal) => {
+    if (!signal.project_name) {
+      showToast('Нет имени проекта для добавления')
+      return
+    }
+    setAdding(signal.id)
+    try {
+      const { error } = await supabase.from('projects').upsert({
+        name: signal.project_name,
+        ticker: signal.ticker || null,
+        chain: signal.chain || 'Unknown',
+        source: 'Telegram',
+        status: 'not_contacted',
+        is_priority: ['Solana', 'TON', 'Base'].includes(signal.chain),
+      }, { onConflict: 'name,chain' })
+
+      if (!error) {
+        await supabase.from('tg_signals').update({ is_added_to_leads: true }).eq('id', signal.id)
+        setSignals(prev => prev.map(s => s.id === signal.id ? { ...s, is_added_to_leads: true } : s))
+        showToast(`${signal.project_name} добавлен в лиды`)
+      } else {
+        showToast('Ошибка добавления: ' + error.message)
+      }
+    } catch (e) {
+      showToast('Ошибка: ' + e.message)
+    }
+    setAdding(null)
+  }
+
+  const signalBadge = (type) => {
+    const map = {
+      tge_listing: { label: 'TGE / Listing', cls: 'signal-tge' },
+      activity: { label: 'Activity', cls: 'signal-activity' },
+      long_term: { label: 'Long-term', cls: 'signal-longterm' },
+      noise: { label: 'Noise', cls: 'signal-noise' },
+    }
+    const meta = map[type] || { label: type, cls: '' }
+    return <span className={`signal-badge ${meta.cls}`}>{meta.label}</span>
+  }
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '—'
+    return new Date(dateStr).toLocaleString('ru-RU', {
+      day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit'
+    })
+  }
+
+  if (loading) {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center', color: 'var(--text-muted)' }}>
+        Загрузка сигналов...
+      </div>
+    )
+  }
+
+  if (signals.length === 0) {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center' }}>
+        <div style={{ fontSize: '48px', marginBottom: '16px' }}>📡</div>
+        <div style={{ color: 'var(--text-primary)', fontSize: '18px', marginBottom: '8px' }}>Нет сигналов</div>
+        <div style={{ color: 'var(--text-muted)', fontSize: '14px', maxWidth: '400px', margin: '0 auto' }}>
+          Настрой TG парсер: добавь каналы в <code>TG_CHANNELS</code> (GitHub repo variables)
+          и запусти workflow <code>TG Signal Parser</code> в GitHub Actions.
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      {/* Signal KPIs */}
+      <section className="kpi-grid">
+        <div className="kpi-card tone-positive">
+          <div className="kpi-label">TGE / Listing</div>
+          <div className="kpi-value">{typeCounts.tge_listing}</div>
+        </div>
+        <div className="kpi-card tone-neutral">
+          <div className="kpi-label">Activity</div>
+          <div className="kpi-value">{typeCounts.activity}</div>
+        </div>
+        <div className="kpi-card tone-neutral">
+          <div className="kpi-label">Long-term</div>
+          <div className="kpi-value">{typeCounts.long_term}</div>
+        </div>
+        <div className="kpi-card tone-negative">
+          <div className="kpi-label">Total Signals</div>
+          <div className="kpi-value">{signals.length}</div>
+        </div>
+      </section>
+
+      {/* Filters */}
+      <div className="segment-tabs" style={{ marginBottom: '8px' }}>
+        {[
+          { key: 'all', label: `Все (без шума)` },
+          { key: 'tge_listing', label: `🔴 TGE/Listing ${typeCounts.tge_listing}` },
+          { key: 'activity', label: `🟡 Activity ${typeCounts.activity}` },
+          { key: 'long_term', label: `🟢 Long-term ${typeCounts.long_term}` },
+          { key: 'noise', label: `⚪ Noise ${typeCounts.noise}` },
+        ].map(tab => (
+          <button
+            key={tab.key}
+            className={`seg-tab ${filterType === tab.key ? 'active' : ''}`}
+            onClick={() => setFilterType(tab.key)}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="filter-bar" style={{ marginBottom: '16px' }}>
+        <select
+          className="filter-select"
+          value={filterChannel}
+          onChange={e => setFilterChannel(e.target.value)}
+        >
+          <option value="all">Все каналы</option>
+          {channels.map(ch => (
+            <option key={ch} value={ch}>@{ch}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Signal cards */}
+      <div className="signal-grid">
+        {filtered.map(signal => (
+          <div key={signal.id} className={`signal-card ${signal.is_added_to_leads ? 'signal-added' : ''}`}>
+            <div className="signal-header">
+              {signalBadge(signal.signal_type)}
+              <span className="signal-score" title="Relevance score">
+                {signal.relevance_score}/10
+              </span>
+              <span className="signal-date">{formatDate(signal.message_date)}</span>
+            </div>
+
+            {signal.project_name && (
+              <div className="signal-project">
+                {signal.project_name}
+                {signal.ticker && <span className="signal-ticker">${signal.ticker}</span>}
+                {signal.chain && <span className={`chain-badge chain-${signal.chain}`}>{signal.chain}</span>}
+              </div>
+            )}
+
+            {signal.ai_summary && (
+              <div className="signal-summary">{signal.ai_summary}</div>
+            )}
+
+            <div className="signal-source">
+              <span>@{signal.channel_username}</span>
+            </div>
+
+            <details className="signal-details">
+              <summary>Полный текст</summary>
+              <div className="signal-text">{signal.message_text}</div>
+            </details>
+
+            <div className="signal-actions">
+              {signal.is_added_to_leads ? (
+                <span className="signal-added-label">В лидах</span>
+              ) : signal.project_name ? (
+                <button
+                  className="btn-add-lead"
+                  onClick={() => handleAddToLeads(signal)}
+                  disabled={adding === signal.id}
+                >
+                  {adding === signal.id ? '...' : '+ В лиды'}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textAlign: 'right' }}>
+        Показано {filtered.length} из {signals.length} сигналов
+      </div>
+
+      {toast && <div className="toast">✓ {toast}</div>}
+    </div>
+  )
+}
+
 /* ─── SkeletonRow ──────────────────────────────────────────────────────── */
 function SkeletonRow() {
   return (
@@ -497,6 +722,7 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false)
   const [refreshProgress, setRefreshProgress] = useState('')
   const [refreshRunUrl, setRefreshRunUrl] = useState('')
+  const [activePage, setActivePage] = useState('leads')
 
   const showToast = (msg) => {
     setToast(msg)
@@ -867,7 +1093,10 @@ export default function App() {
         <div className="header-logo">
           <span className="moon-icon">🚀</span>
           <span>Tothemoon</span>
-          <span style={{ color: 'var(--text-muted)', fontWeight: 400, fontSize: '14px' }}>Lead Gen</span>
+          <div className="page-tabs">
+            <button className={`page-tab ${activePage === 'leads' ? 'active' : ''}`} onClick={() => setActivePage('leads')}>Leads</button>
+            <button className={`page-tab ${activePage === 'signals' ? 'active' : ''}`} onClick={() => setActivePage('signals')}>📡 TG Signals</button>
+          </div>
         </div>
         <div className="header-stats">
           <div className="stat-pill"><span className="dot" /><span>Live</span></div>
@@ -888,6 +1117,8 @@ export default function App() {
       </header>
 
       <main className="main-content">
+        {activePage === 'signals' && <TGSignalsPage />}
+        {activePage === 'leads' && <>
         <section className="kpi-grid">
           {kpis.map(item => (
             <div key={item.label} className={`kpi-card tone-${item.tone}`}>
@@ -1112,6 +1343,7 @@ export default function App() {
         <div style={{ marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textAlign: 'right' }}>
           Показано {filtered.length} из {projects.length} проектов
         </div>
+        </>}
       </main>
 
       {modalProject && (
