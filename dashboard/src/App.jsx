@@ -664,7 +664,7 @@ function TGSignalsPage() {
             {(links.website || links.twitter || links.telegram) && (
               <div className="signal-links">
                 {links.website && (
-                  <a href={links.website} target="_blank" rel="noopener noreferrer" className="signal-link signal-link-web" title={links.website}>
+                  <a href={links.website.startsWith('http') ? links.website : `https://${links.website}`} target="_blank" rel="noopener noreferrer" className="signal-link signal-link-web" title={links.website}>
                     🌐 Сайт
                   </a>
                 )}
