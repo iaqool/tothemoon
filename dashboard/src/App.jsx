@@ -636,7 +636,9 @@ function TGSignalsPage() {
 
       {/* Signal cards */}
       <div className="signal-grid">
-        {filtered.map(signal => (
+        {filtered.map(signal => {
+          const links = signal.project_links || {}
+          return (
           <div key={signal.id} className={`signal-card ${signal.is_added_to_leads ? 'signal-added' : ''}`}>
             <div className="signal-header">
               {signalBadge(signal.signal_type)}
@@ -656,6 +658,27 @@ function TGSignalsPage() {
 
             {signal.ai_summary && (
               <div className="signal-summary">{signal.ai_summary}</div>
+            )}
+
+            {/* Project contact links */}
+            {(links.website || links.twitter || links.telegram) && (
+              <div className="signal-links">
+                {links.website && (
+                  <a href={links.website.startsWith('http') ? links.website : `https://${links.website}`} target="_blank" rel="noopener noreferrer" className="signal-link signal-link-web" title={links.website}>
+                    🌐 Сайт
+                  </a>
+                )}
+                {links.twitter && (
+                  <a href={links.twitter.startsWith('http') ? links.twitter : `https://x.com/${links.twitter.replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="signal-link signal-link-twitter" title={links.twitter}>
+                    𝕏 Twitter
+                  </a>
+                )}
+                {links.telegram && (
+                  <a href={links.telegram.startsWith('http') ? links.telegram : `https://t.me/${links.telegram.replace('@', '')}`} target="_blank" rel="noopener noreferrer" className="signal-link signal-link-tg" title={links.telegram}>
+                    ✈️ Telegram
+                  </a>
+                )}
+              </div>
             )}
 
             <div className="signal-source">
@@ -681,7 +704,8 @@ function TGSignalsPage() {
               ) : null}
             </div>
           </div>
-        ))}
+          )
+        })}
       </div>
 
       <div style={{ marginTop: '16px', fontSize: '12px', color: 'var(--text-muted)', textAlign: 'right' }}>

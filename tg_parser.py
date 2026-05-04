@@ -15,7 +15,7 @@ Environment variables:
     SUPABASE_KEY          - Supabase anon key
     GEMINI_API_KEY        - Google Gemini API key
     TG_CHANNELS           - comma-separated channel usernames (e.g. "crypto_news,ton_news")
-    TG_PARSE_LIMIT        - messages per channel per run (default: 30)
+    TG_PARSE_LIMIT        - messages per channel per run (default: 50)
 """
 
 import asyncio
@@ -35,37 +35,40 @@ load_dotenv()
 SUPABASE_URL = os.getenv("SUPABASE_URL", "")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
-TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID", "0"))
+TELEGRAM_API_ID = int(os.getenv("TELEGRAM_API_ID") or "0")
 TELEGRAM_API_HASH = os.getenv("TELEGRAM_API_HASH", "")
 TELEGRAM_SESSION = os.getenv("TELEGRAM_SESSION", "")
 TG_CHANNELS = [ch.strip() for ch in os.getenv("TG_CHANNELS", "").split(",") if ch.strip()]
-TG_PARSE_LIMIT = int(os.getenv("TG_PARSE_LIMIT", "30"))
+TG_PARSE_LIMIT = int(os.getenv("TG_PARSE_LIMIT") or "50")
 
-CLASSIFY_PROMPT = """You are a crypto market intelligence analyst for a token listing agency.
-Your job is to analyze Telegram channel posts and classify them for business development purposes.
+CLASSIFY_PROMPT = """You are a crypto BD analyst for a CEX listing agency.
+Analyze each Telegram post and extract actionable outreach data.
 
-For each post, determine:
-1. signal_type: one of:
-   - "tge_listing" — project announces TGE, token launch, exchange listing, IDO/IEO/ICO
-   - "activity" — project launches campaign, partnership, airdrop, testnet, mainnet, significant update
-   - "long_term" — project shows growth metrics, funding round, major milestone, ecosystem expansion
-   - "noise" — not relevant for BD outreach (memes, price discussion, general crypto news without specific project)
+Return JSON with these fields:
+1. signal_type: "tge_listing" | "activity" | "long_term" | "noise"
+   - tge_listing: TGE announced, token launch, exchange listing, IDO/IEO
+   - activity: campaign, partnership, airdrop, testnet, mainnet launch
+   - long_term: funding round, growth metrics, ecosystem expansion
+   - noise: irrelevant (memes, price talk, generic news)
 
-2. project_name: the name of the specific crypto project mentioned (null if none or generic news)
-3. ticker: the token ticker if mentioned (null if not)
-4. chain: the blockchain if mentioned (Solana, TON, Base, Ethereum, BNB Chain, etc; null if not clear)
-5. ai_summary: 1-2 sentence summary of what's happening and why it matters for listing BD
-6. relevance_score: 1-10 (10 = hot lead, must contact immediately; 1 = barely relevant)
+2. project_name: specific project name (null if generic news)
+3. ticker: token ticker (null if not mentioned)
+4. chain: blockchain (Solana, TON, Base, Ethereum, BNB Chain, etc; null if unclear)
+5. ai_summary: 1 sentence — what happened and why we should contact them
+6. relevance_score: 1-10 (10 = must contact now)
+7. project_links: object with any links found or inferred:
+   - website: project website URL (null if not found)
+   - twitter: Twitter/X URL or handle (null if not found)
+   - telegram: project Telegram group/channel URL (null if not found)
 
-IMPORTANT:
-- Focus on projects that would need listing services, market making, or liquidity
-- TGE/listing announcements are highest priority (8-10)
-- New projects seeking exchange listings are more valuable than established ones
-- Posts about specific projects are more valuable than general market commentary
-- If post is clearly noise/irrelevant, set score to 1-2 and type to "noise"
+Priority:
+- TGE/listing = 8-10, new projects > established ones
+- Extract ALL contact links from the post text (websites, Twitter handles, Telegram links)
+- If you see @username in text, include it as twitter or telegram link
+- noise = score 1-2
 
-Respond with valid JSON only. No markdown, no explanation. Example:
-{"signal_type": "tge_listing", "project_name": "SomeToken", "ticker": "SOME", "chain": "Solana", "ai_summary": "SomeToken announces TGE on May 15 with Bybit listing confirmed. Pre-sale ongoing.", "relevance_score": 9}
+Respond with valid JSON only. Example:
+{"signal_type": "tge_listing", "project_name": "SomeToken", "ticker": "SOME", "chain": "Solana", "ai_summary": "SomeToken TGE May 15, Bybit listing confirmed.", "relevance_score": 9, "project_links": {"website": "https://sometoken.io", "twitter": "@SomeToken", "telegram": "https://t.me/sometoken"}}
 """
 
 
@@ -183,6 +186,8 @@ async def parse_channels():
                 if msg_date and msg_date.tzinfo is None:
                     msg_date = msg_date.replace(tzinfo=timezone.utc)
 
+                links = classification.get("project_links") or {}
+
                 signal = {
                     "channel_username": channel_username,
                     "channel_title": channel_title,
@@ -195,6 +200,7 @@ async def parse_channels():
                     "chain": classification.get("chain"),
                     "relevance_score": classification["relevance_score"],
                     "message_date": msg_date.isoformat() if msg_date else None,
+                    "project_links": links if links else None,
                 }
                 new_signals.append(signal)
 
