@@ -106,9 +106,12 @@ CREATE TABLE IF NOT EXISTS public.tg_signals (
     relevance_score INTEGER DEFAULT 0, -- 1-10
     message_date TIMESTAMP WITH TIME ZONE,
     is_added_to_leads BOOLEAN DEFAULT false,
+    project_links JSONB,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()),
     CONSTRAINT unique_tg_signal UNIQUE (channel_username, message_id)
 );
+
+ALTER TABLE public.tg_signals ADD COLUMN IF NOT EXISTS project_links JSONB;
 
 CREATE INDEX IF NOT EXISTS idx_tg_signals_type ON public.tg_signals(signal_type);
 CREATE INDEX IF NOT EXISTS idx_tg_signals_date ON public.tg_signals(message_date);

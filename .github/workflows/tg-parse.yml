@@ -2,13 +2,13 @@ name: TG Signal Parser
 
 on:
   schedule:
-    - cron: '30 */2 * * *'  # Every 2 hours at :30
+    - cron: '0 9 * * *'  # Daily at 09:00 UTC
   workflow_dispatch:
     inputs:
       limit:
         description: 'Messages per channel'
         required: false
-        default: '30'
+        default: '50'
 
 concurrency:
   group: tg-parse
@@ -27,7 +27,7 @@ jobs:
       TELEGRAM_API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
       TELEGRAM_SESSION: ${{ secrets.TELEGRAM_SESSION }}
       TG_CHANNELS: ${{ vars.TG_CHANNELS }}
-      TG_PARSE_LIMIT: ${{ inputs.limit || '30' }}
+      TG_PARSE_LIMIT: ${{ inputs.limit || '50' }}
 
     steps:
       - name: Checkout repository
@@ -52,4 +52,5 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "- **Channels:** $TG_CHANNELS" >> $GITHUB_STEP_SUMMARY
           echo "- **Limit:** ${TG_PARSE_LIMIT} messages/channel" >> $GITHUB_STEP_SUMMARY
+          echo "- **Schedule:** Daily at 09:00 UTC" >> $GITHUB_STEP_SUMMARY
           echo "- **Time:** $(date -u '+%Y-%m-%d %H:%M UTC')" >> $GITHUB_STEP_SUMMARY
