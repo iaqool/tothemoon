@@ -15,7 +15,7 @@ Environment variables:
     SUPABASE_KEY          - Supabase anon key
     GEMINI_API_KEY        - Google Gemini API key
     TG_CHANNELS           - comma-separated channel usernames (e.g. "crypto_news,ton_news")
-    TG_PARSE_LIMIT        - messages per channel per run (default: 30)
+    TG_PARSE_LIMIT        - messages per channel per run (default: 50)
 """
 
 import asyncio
